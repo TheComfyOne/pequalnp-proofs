@@ -50,7 +50,7 @@ Open into `open-goat/pequalnp-proofs`. Title is exactly the gap id (for example 
 
 ## Search and circuit steps
 
-For search shards and small-circuit existence/refutation, use `kissat` and/or `cadical` to find a witness or prove unsat, then have Lean verify the certificate with `decide` (never `native_decide`). Keep SAT work out of the proof PR; only the Lean file is submitted. `.cursor/tools/open_steps.sh` lists desk gaps with no open/merged PR, easiest first. `.cursor/templates/SmallCircuit.lean` is a `decide` circuit sketch; `.cursor/examples/` holds copied accepted proofs of the same kind.
+For search shards and small-circuit existence/refutation, use `kissat` and/or `cadical` to find a witness or prove unsat, then have Lean verify the certificate with `decide` (never `native_decide`). Keep SAT work out of the proof PR; only the Lean file is submitted. `.cursor/tools/open_steps.sh` lists desk gaps with no open/merged PR, easiest first. `.cursor/templates/SmallCircuit.lean` is a `decide` circuit sketch; `.cursor/examples/` holds copied accepted proofs of the same kind. Paste `.cursor/lib/CircuitKit.lean` (BEGIN/END) via `.cursor/tools/new_proof.sh`; never put `.cursor/` on a proof branch.
 
 ## Desk
 
