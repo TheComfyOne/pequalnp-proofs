@@ -1,0 +1,4 @@
+{
+  "name": "pequalnp-proofs",
+  "install": "[ ! -d '/agent/repos/pequalnp-proofs' ] || cd '/agent/repos/pequalnp-proofs' || exit $?\nbash .cursor/install.sh"
+}

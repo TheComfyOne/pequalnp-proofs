@@ -1,0 +1,57 @@
+---
+description: Standing rules for Lean proofs in TheComfyOne/pequalnp-proofs
+alwaysApply: true
+---
+
+# pequalnp-proofs
+
+Site instructions live at https://pequalnp.com/join.txt (also saved at `.cursor/pequalnp-join.txt`). Re-fetch that URL if the copy looks stale. Follow join.txt, CONTRIBUTING.md, and this file. join.txt wins on desk/lease procedure; this file wins on git identity, branch cut, and pull-request shape for this fork.
+
+## Identity
+
+Commit as both author and committer:
+
+- Name: `TheComfyOne`
+- Email: `210307828+TheComfyOne@users.noreply.github.com`
+
+```
+GIT_AUTHOR_NAME=TheComfyOne
+GIT_AUTHOR_EMAIL=210307828+TheComfyOne@users.noreply.github.com
+GIT_COMMITTER_NAME=TheComfyOne
+GIT_COMMITTER_EMAIL=210307828+TheComfyOne@users.noreply.github.com
+```
+
+## Branch cut (mandatory)
+
+Every proof branch must be cut from upstream `open-goat/pequalnp-proofs` main so this fork's `.cursor/` files never appear in a proof PR. PRs must contain exactly one Lean file.
+
+```
+git fetch upstream
+git checkout -b <gap id> upstream/main
+```
+
+If `upstream` is missing: `git remote add upstream https://github.com/open-goat/pequalnp-proofs.git`
+
+Do not branch from this fork's `main`, and do not include `.cursor/`, install scripts, or rules in a proof PR.
+
+## Lean file
+
+One file: `lean/PEqualNP/Outside/L_<gap>.lean` (lowercase letters, digits, underscores). One theorem named after the module, last in the file, full name. Helpers only inside `namespace <module> ... end <module>` (or `_aux` / a name below either). Imports only `Mathlib`, Mathlib modules, and `gap.imports`. The word `import` appears only in the import lines at the top.
+
+Forbidden: `sorry`; new `axiom`; `native_decide`; any `#` command (`#eval` and the rest); `macro` / `syntax` / `notation` / `elab`; string literals (no double quotes anywhere); `initialize`; `attribute` commands. Options: only `set_option maxHeartbeats N in`, `set_option maxRecDepth N in`, `set_option synthInstance.maxSize N in`, `set_option synthInstance.maxHeartbeats N in`, each on its own line directly above the declaration it serves. Attributes: only `@[simp]` and `@[local simp]`.
+
+Prove the posted statement exactly. If it is false, prove the desk's negated twin (`It is false that ...`) when that twin exists; otherwise prove `¬ (posted statement)` and submit with checker kind `refute`. Do not rewrite the statement.
+
+Before submit: `lake build <gap.module>` and `node tools/check-lean.mjs <lean file> <statement file> [check|refute]` must pass.
+
+## Pull requests
+
+Open into `open-goat/pequalnp-proofs`. Title is exactly the gap id (for example `L-meta-2232`). Use the default PR template from `.github/PULL_REQUEST_TEMPLATE.md` **without** the X handle and LinkedIn lines. Fill Gap id, the one file path, Agent used (`Cursor`), and the checklist. Do not add extra files.
+
+## Search and circuit steps
+
+For search shards and small-circuit existence/refutation, use `kissat` and/or `cadical` to find a witness or prove unsat, then have Lean verify the certificate with `decide` (never `native_decide`). Keep SAT work out of the proof PR; only the Lean file is submitted.
+
+## Desk
+
+Work only on a step with a live lease. Renew with `tools/pnp.sh beat <step>` (or the desk `beat` URL) while working. Do not open issues or PRs that are not a proof of the held step.
