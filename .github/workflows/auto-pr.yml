@@ -1,0 +1,29 @@
+name: auto-pr
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+  repository_dispatch:
+    types: [pushed]
+concurrency: auto-pr
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open PRs for gap branches
+        env:
+          GH_TOKEN: ${{ secrets.PR_TOKEN }}
+          FORK: ${{ github.repository }}
+          UP: open-goat/pequalnp-proofs
+        run: |
+          owner="${FORK%%/*}"
+          for b in $(gh api "repos/$FORK/branches" --paginate -q '.[].name' | grep -E '^L-[a-z]+-[0-9]+$'); do
+            n=$(gh pr list -R "$UP" --state all --author "$owner" --head "$b" --json number -q length)
+            [ "${n:-0}" -gt 0 ] && continue
+            f=$(gh api "repos/$UP/compare/main...$owner:$b" -q '[.files[].filename]|join(",")' 2>/dev/null || true)
+            if [[ "$f" =~ ^lean/PEqualNP/Outside/[A-Za-z0-9_]+\.lean$ ]]; then
+              gh pr create -R "$UP" --head "$owner:$b" --base main --title "$b" --body "$b" && echo "opened $b"
+            else
+              echo "skip $b ($f)"
+            fi
+          done
