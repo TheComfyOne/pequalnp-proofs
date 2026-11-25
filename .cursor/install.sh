@@ -34,7 +34,7 @@ link_elan() {
 }
 
 install_apt() {
-  local pkgs=(ca-certificates curl git xz-utils unzip build-essential python3 python3-venv)
+  local pkgs=(ca-certificates curl git xz-utils unzip build-essential python3 python3-venv python3-pip)
   local missing=() p
   for p in "${pkgs[@]}"; do
     dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p")
@@ -91,6 +91,16 @@ fetch_mathlib_and_prebuild() {
   (cd lean && lake build PEqualNP.Defs)
   log "prebuild checklemma (tools/check-lean.mjs verifier)"
   (cd lean && lake build checklemma)
+}
+
+install_python_pkgs() {
+  if python3 -c 'import pysat, networkx' >/dev/null 2>&1; then
+    log "python-sat and networkx already importable"
+    return 0
+  fi
+  log "pip install python-sat networkx (user site)"
+  python3 -m pip install --user --break-system-packages --upgrade pip >/dev/null
+  python3 -m pip install --user --break-system-packages 'python-sat' 'networkx'
 }
 
 install_kissat() {
@@ -163,6 +173,7 @@ verify_tools() {
   fi
   node -e 'const m=parseInt(process.versions.node,10); if (m<20) { console.error("need Node.js 20+"); process.exit(1); }'
   python3 --version
+  python3 -c 'import pysat, networkx; print("pysat", getattr(pysat, "__version__", "ok")); print("networkx", networkx.__version__)'
   gh --version | head -n1
   lake --version | head -n1
   lean --version | head -n1
@@ -181,5 +192,6 @@ install_lean_toolchain
 fetch_mathlib_and_prebuild
 install_kissat
 install_cadical
+install_python_pkgs
 on_path
 verify_tools
