@@ -37,9 +37,12 @@ Instance-specific blobs (`L_`, `M_`, `Y_`, `T_cert`, `K_0`…) are **not** in
 the kit. Those are per-graph search certificates; paste the kit, then add
 your own `L_` / `T_cert` and call `lb_cert`.
 
-`inductive BT` is a new data type. A proof file that includes it is not
-auto-merged; it waits for a person. The rest of Section 1 is definitions
-and lemmas on `Circuit` / `Gate` from `PEqualNP.Defs`.
+`BT` is `List (List ℕ)`: inorder flattening of the old binary tree (`BT.lf = []`,
+`BT.nd l k r = l ++ k :: r`, `BT.mem` is `List.any` over `leqL`). No new
+data type is declared. `.cursor/tools/new_proof.sh` pastes only the decls a
+statement needs when that is obvious, and refuses to emit a new data type.
+`.cursor/tools/precheck.sh` rejects a proof file that contains that word,
+`sorry`, `axiom`, or `native_decide`, or a branch with more than one Lean file.
 
 ## Local check
 
@@ -47,3 +50,5 @@ The file after `-- CIRCUITKIT END` re-proves willakone's merged
 `L-meta-5443` (a 7-gate `Monotone2` circuit that `Represents` bitmask
 15839 on `Fin 4 × Fin 4`) using `monotone2_of_and_or`, `size_eq_len`,
 `eval_eq`, and `decide +kernel`. That theorem is not for pasting.
+`.cursor/tools/new_proof.sh --kit-use monotone2_of_and_or,size_eq_len,eval_eq`
+keeps those four decls plus `wiresFrom`.

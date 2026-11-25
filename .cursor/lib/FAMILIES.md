@@ -32,7 +32,7 @@ not a different pattern.
 
 ## Families and proof patterns
 
-### 1. Fixed 6-vertex edge function, `HasCircuitSize ≥ 8` (kit family)
+### 1. Fixed 6-vertex edge function, `HasCircuitSize ≥ 8` (kit family, `BT` as a list of keys)
 
 - **Wins:** `L-meta-7269`, `7270`, `7278`, `7281`, `7283`, `7284`, `7285`,
   `7286`, `7292`, `7299`, `7308`, `7309` (PRs `#11937`, `#11956`, `#11938`,
@@ -42,10 +42,10 @@ not a different pattern.
   circuit of AND, OR and NOT gates of fan-in two for its edge function
   has at least 8 gates`.
 - **Pattern:** paste CircuitKit; encode the edge function as a 64-bit
-  truth table (`encL` / `Y_`); close a `BT` of failing `NatRun` states
-  (`T_cert`, `K_0`…`K_4`) under `next` / `stepOK`; finish with
-  `lb_cert … 7 8`. `decide +kernel` only on the certificate, not on the
-  circuit search.
+  truth table (`encL` / `Y_`); close a `BT` (`List (List ℕ)` of failing
+  `NatRun` keys, built with `BT.nd` / `BT.lf` or a list literal) under
+  `next` / `stepOK`; finish with `lb_cert … 7 8`. `decide +kernel` only
+  on the certificate, not on the circuit search.
 - **Kit parts:** all of them, especially Run/NatRun and the frontier
   certificate.
 

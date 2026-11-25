@@ -1995,9 +1995,13 @@ theorem run_nil {α inv meet join y t} (h : @Run α inv meet join y t []) : Fals
 
 def isort (l : List ℕ) : List ℕ := l.insertionSort (· ≤ ·)
 
-inductive BT where
-  | lf : BT
-  | nd : BT → List ℕ → BT → BT
+/-- Inorder flattening of the old binary tree of `List ℕ` keys: a leaf is `[]`,
+    a node is `l ++ k :: r`. Membership is `List.any` over `leqL`. -/
+abbrev BT := List (List ℕ)
+
+def BT.lf : BT := []
+
+def BT.nd (l : BT) (k : List ℕ) (r : BT) : BT := l ++ k :: r
 
 def leqL : List ℕ → List ℕ → Bool
   | [], [] => true
@@ -2022,32 +2026,21 @@ def ltL : List ℕ → List ℕ → Bool
   | _ :: _, [] => false
   | a :: s, b :: t => Nat.blt a b || (Nat.beq a b && ltL s t)
 
-def BT.mem : BT → List ℕ → Bool
-  | .lf, _ => false
-  | .nd l k r, x => leqL x k || (if ltL x k then l.mem x else r.mem x)
+def BT.mem (T : BT) (x : List ℕ) : Bool := T.any (fun k => leqL x k)
 
-def BT.toList : BT → List (List ℕ)
-  | .lf => []
-  | .nd l k r => l.toList ++ k :: r.toList
+def BT.toList (T : BT) : List (List ℕ) := T
 
-theorem BT.mem_toList : ∀ (T : BT) (x : List ℕ), T.mem x = true → x ∈ T.toList
-  | .lf, x, h => by simp [BT.mem] at h
-  | .nd l k r, x, hm => by
-      simp only [BT.mem, Bool.or_eq_true] at hm
-      simp only [BT.toList, List.mem_append, List.mem_cons]
-      rcases hm with he | hm
-      · exact Or.inr (Or.inl (leqL_eq x k he))
-      · split at hm
-        · exact Or.inl (BT.mem_toList l x hm)
-        · exact Or.inr (Or.inr (BT.mem_toList r x hm))
+theorem BT.mem_toList (T : BT) (x : List ℕ) (h : BT.mem T x = true) : x ∈ BT.toList T := by
+  obtain ⟨k, hk, he⟩ := List.any_eq_true.mp h
+  simpa [BT.toList, leqL_eq x k he] using hk
 
 theorem all_app {α : Type} {p : α → Bool} {A B : List α} (ha : A.all p = true) (hb : B.all p = true) :
     (A ++ B).all p = true := by
   rw [List.all_append, ha, hb]; rfl
 
 theorem cover {p : List ℕ → List (ℕ × ℕ) → Bool} (T : BT) (L : List (List ℕ × List (ℕ × ℕ)))
-    (hK : T.toList = L.map Prod.fst) (hL : L.all (fun kh => p kh.1 kh.2) = true) :
-    ∀ x, T.mem x = true → ∃ h, p x h = true := by
+    (hK : BT.toList T = L.map Prod.fst) (hL : L.all (fun kh => p kh.1 kh.2) = true) :
+    ∀ x, BT.mem T x = true → ∃ h, p x h = true := by
   intro x hx
   have h1 := BT.mem_toList T x hx
   rw [hK, List.mem_map] at h1
@@ -2224,12 +2217,12 @@ def hfind (G : List (List ℕ)) (T : BT) (t : ℕ) (h : List (ℕ × ℕ)) (tag 
   match h.lookup tag with
   | some j =>
     match G[j]? with
-    | some pi => T.mem (t :: isort (ys.map (actL pi)))
+    | some pi => BT.mem T (t :: isort (ys.map (actL pi)))
     | none => false
   | none => false
 
 theorem hfind_false {m y : ℕ} {G : List (List ℕ)} (hG : symOK m y G = true) (T : BT) (t : ℕ)
-    (ih : ∀ ws, NatRun m y t ws → T.mem (t :: isort ws) = false)
+    (ih : ∀ ws, NatRun m y t ws → BT.mem T (t :: isort ws) = false)
     (h : List (ℕ × ℕ)) (tag : ℕ) {ys : List ℕ} (hys : NatRun m y t ys) : hfind G T t h tag ys = false := by
   unfold hfind
   split
@@ -2246,39 +2239,39 @@ def stepOK (m y : ℕ) (pD pM : List (ℕ × ℕ)) (G : List (List ℕ)) (T : BT
   | [], _ => false
   | 0 :: _, _ => false
   | (t + 1) :: es, h => !(next m (t + 2 - es.length) es
-      (fun tag ys => via y pD pM t ys && !T.mem (t :: isort ys) && !hfind G T t h tag ys))
+      (fun tag ys => via y pD pM t ys && !BT.mem T (t :: isort ys) && !hfind G T t h tag ys))
 
 theorem closure_sound {m y : ℕ} {pD pM : List (ℕ × ℕ)} {G : List (List ℕ)} (T : BT)
     (hp : prsOK m y pD pM = true) (hG : symOK m y G = true)
-    (hT : ∀ x, T.mem x = true → ∃ h, stepOK m y pD pM G T x h = true) :
-    ∀ t ws, NatRun m y t ws → T.mem (t :: isort ws) = false := by
+    (hT : ∀ x, BT.mem T x = true → ∃ h, stepOK m y pD pM G T x h = true) :
+    ∀ t ws, NatRun m y t ws → BT.mem T (t :: isort ws) = false := by
   intro t
   induction t with
   | zero =>
     intro ws _
-    cases hm : T.mem (0 :: isort ws)
+    cases hm : BT.mem T (0 :: isort ws)
     · rfl
     · obtain ⟨h, hs⟩ := hT _ hm
       simp [stepOK] at hs
   | succ t ih =>
     intro ws hw
-    cases hm : T.mem ((t + 1) :: isort ws)
+    cases hm : BT.mem T ((t + 1) :: isort ws)
     · rfl
     · obtain ⟨h, hs⟩ := hT _ hm
       simp only [stepOK, Bool.not_eq_true'] at hs
       have hperm : (isort ws).Perm ws := List.perm_insertionSort _ _
       have hr : NatRun m y (t + 1) (isort ws) := Run.perm hperm.symm hw
       have hn := next_complete hr t rfl (isort ws) (List.Perm.refl _)
-        (fun tag ys => via y pD pM t ys && !T.mem (t :: isort ys) && !hfind G T t h tag ys)
+        (fun tag ys => via y pD pM t ys && !BT.mem T (t :: isort ys) && !hfind G T t h tag ys)
         (fun tag ys hys => by simp [via_sound hp hys, ih ys hys, hfind_false hG T t ih h tag hys])
       rw [hn] at hs; cases hs
 
 def rootOK (y : ℕ) (pD pM : List (ℕ × ℕ)) (G : List (List ℕ)) (T : BT) (cap : ℕ) (zs : List ℕ) : Bool :=
-  !via y pD pM cap zs || T.mem (cap :: isort zs) || G.any (fun pi => T.mem (cap :: isort (zs.map (actL pi))))
+  !via y pD pM cap zs || BT.mem T (cap :: isort zs) || G.any (fun pi => BT.mem T (cap :: isort (zs.map (actL pi))))
 
 theorem cert_core {m y : ℕ} {xs : List ℕ} {pD pM : List (ℕ × ℕ)} {G : List (List ℕ)} {T : BT} {cap : ℕ}
     (hp : prsOK m y pD pM = true) (hG : symOK m y G = true)
-    (hT : ∀ x, T.mem x = true → ∃ h, stepOK m y pD pM G T x h = true)
+    (hT : ∀ x, BT.mem T x = true → ∃ h, stepOK m y pD pM G T x h = true)
     (hi : xs.sublists.all (rootOK y pD pM G T cap) = true)
     {s' : ℕ} (hs' : s' ≤ cap) {ws : List ℕ} (hsub : ws.Sublist xs) (hr : NatRun m y s' ws) : False := by
   have hmem := List.all_eq_true.1 hi _ (List.mem_sublists.2 hsub)
@@ -2290,7 +2283,7 @@ theorem cert_core {m y : ℕ} {xs : List ℕ} {pD pM : List (ℕ × ℕ)} {G : L
     have hcap : NatRun m y cap (a :: r) := extend_run hr hs'
     have hd := via_sound hp hcap
     have hc := closure_sound T hp hG hT cap (a :: r) hcap
-    have hg : (G.any fun pi => T.mem (cap :: isort ((a :: r).map (actL pi)))) = false := by
+    have hg : (G.any fun pi => BT.mem T (cap :: isort ((a :: r).map (actL pi)))) = false := by
       rw [List.any_eq_false]
       intro pi hpi
       obtain ⟨hm, hy⟩ := symOK_mem hG hpi
@@ -2309,7 +2302,7 @@ theorem lb_cert {n : ℕ} (f : BFn n) (l : List ℕ) (m y : ℕ) (xs : List ℕ)
       (fun a => encL a l) = xs)
     (hnc : ∃ a b : Fin n → Bool, f a ≠ f b)
     (hp : prsOK m y pD pM = true) (hG : symOK m y G = true)
-    (hT : ∀ x, T.mem x = true → ∃ h, stepOK m y pD pM G T x h = true)
+    (hT : ∀ x, BT.mem T x = true → ∃ h, stepOK m y pD pM G T x h = true)
     (hi : xs.sublists.all (rootOK y pD pM G T cap) = true) :
     ∀ s, HasCircuitSize n f s → lb ≤ s := by
   intro s h

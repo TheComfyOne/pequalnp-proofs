@@ -17,6 +17,7 @@
 #   .cursor/tools/new_steps.sh --seed       # record current ids, print nothing
 #   .cursor/tools/new_steps.sh --interval N
 #   .cursor/tools/new_steps.sh --status FILE --titles FILE
+#   .cursor/tools/new_steps.sh --push FILE  # precheck then git push -u origin HEAD
 set -euo pipefail
 
 STATUS_URL="${STATUS_URL:-https://pequalnp.com/desk/status}"
@@ -34,14 +35,20 @@ ONCE=0
 SEED=0
 STATUS_FILE=""
 TITLES_FILE=""
+PUSH_FILE=""
+PRECHECK="${ROOT}/.cursor/tools/precheck.sh"
 
 usage() {
   cat <<'EOF'
 Usage: .cursor/tools/new_steps.sh [--once] [--seed] [--interval N] [--status FILE] [--titles FILE]
+       .cursor/tools/new_steps.sh --push FILE.lean
 
 Fetch https://pequalnp.com/desk/status every 60s (or once). Compare gap ids to
 .pnp/seen.txt (highest id + known ids). Print newly posted ids and titles with
 no open/merged PR in open-goat/pequalnp-proofs (gap id anywhere in the title).
+
+--push FILE runs .cursor/tools/precheck.sh FILE, then git push -u origin HEAD.
+Every push from this script goes through precheck first.
 EOF
 }
 
@@ -52,6 +59,7 @@ while [ $# -gt 0 ]; do
     --interval) INTERVAL="${2:?}"; shift 2 ;;
     --status) STATUS_FILE="${2:?}"; shift 2 ;;
     --titles) TITLES_FILE="${2:?}"; shift 2 ;;
+    --push) PUSH_FILE="${2:?}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -206,6 +214,27 @@ for g in unclaimed:
     )
 PY
 }
+
+push_proof() {
+  local f="$1"
+  if [ ! -x "${PRECHECK}" ]; then
+    chmod +x "${PRECHECK}" 2>/dev/null || true
+  fi
+  if [ ! -f "${PRECHECK}" ]; then
+    echo "missing ${PRECHECK}" >&2
+    exit 1
+  fi
+  "${PRECHECK}" "${f}"
+  local br
+  br="$(git -C "${ROOT}" rev-parse --abbrev-ref HEAD)"
+  git -C "${ROOT}" push -u origin HEAD
+  echo "PUSHED ${br}"
+}
+
+if [ -n "${PUSH_FILE}" ]; then
+  push_proof "${PUSH_FILE}"
+  exit 0
+fi
 
 if [ "${ONCE}" = 1 ]; then
   poll_once
