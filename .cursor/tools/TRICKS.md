@@ -45,6 +45,45 @@ the posted existence by applying that lemma. Do not search for a circuit.
 If the posted statement is already `¬ (∃ …)` and that `¬` is exactly the
 lemma, prove it as `check`, not `refute`.
 
+## twin-pair sweep (templated)
+
+**Trick.** Every loop, diff `upstream/main` since the last SHA and match
+each newly merged lemma (ours or anyone’s) against open desk rows on the
+same function/promise. A too-small bound is a **refute** via the
+lower-bound lemma; a bound at or above a merged construction is a
+**prove** via that witness. These are 2–3/10 and minutes each — rank
+them first, then emit/build/push from a fixed template. Hand-edit only
+if the one lake build fails.
+
+**Tooling.**
+
+```
+.cursor/tools/rank_gaps.py --twins-only
+.cursor/tools/gen_twin.py GAP LEMMA --push
+.cursor/tools/gen_twin.py --from-rank --push
+```
+
+`gen_twin.py` writes `lean/PEqualNP/Outside/L_<gap>.lean` from one of two
+templates (refute-by-lower-bound or prove-by-witness), runs one
+`lake build` + `precheck` (+ `check-lean`), and pushes. Do not open a PR.
+
+**Examples.**
+
+- `L-meta-25609` (2/10) via `L-meta-25593` — reverse inequality, refute template.
+- `L-meta-25652` (2/10) via `L-meta-25645` — same template, NOT-charging bound.
+- `L-meta-25584` (3/10) via `L-meta-25534` — instantiate `n=5` (template may
+  fail; hand-edit the Fin-25 encoding).
+- `L-meta-25693` already on main — instantiate `n=4` vs 25534’s `2n-1`.
+
+**How to spot.**
+
+1. Run the twin sweep at the start of every loop (rank_gaps does this
+   unless `--no-twins`). State is `.pnp/twin-last-sha`.
+2. Open existence whose last comparison is the reverse of a merged
+   theorem (`A ≤ B` vs `B < A`) under the same hyps.
+3. Open rows whose `imports` name a just-merged Outside lemma.
+4. Titles “Find a … below/beating the bound”. Skip generator families.
+
 ## push-anyway vs a rival PR under 15 min old
 
 **Trick.** Skip a gap at **start** if anyone already has an open GitHub PR
@@ -100,7 +139,8 @@ and conjectures.
 ## other operating notes
 
 - Ranker: `.cursor/tools/rank_gaps.py --gh --kind lib,pcx|meta --max-diff 5`.
-  Prefer **cheap finite / `decide` / small explicit instances** over newest
+  Twin sweep runs first (`--twins-only` to print just those). Prefer
+  **cheap finite / `decide` / small explicit instances** over newest
   rows when the newest look research-scale. Re-check meta/pcx scored 1–5.
 - Identity: `TheComfyOne` / `210307828+TheComfyOne@users.noreply.github.com`
   as both author and committer.
