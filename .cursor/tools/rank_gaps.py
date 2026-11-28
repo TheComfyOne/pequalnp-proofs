@@ -50,7 +50,7 @@ ROW_URL = os.environ.get(
 REPO = os.environ.get("REPO", "open-goat/pequalnp-proofs")
 
 SKIP_TITLE = re.compile(
-    r"table 2\b|monotone six-input|one not saves nothing|one-a-side|one a side"
+    r"table 2\b|one not saves nothing|one-a-side|one a side"
     r"|7-cycle edges|counted gates for four row|two-lit function",
     re.I,
 )

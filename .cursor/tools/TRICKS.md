@@ -8,6 +8,48 @@ proof branch). Proof branches are still cut from `upstream/main` as
 Push only via `.cursor/tools/new_steps.sh --push FILE`. Print
 `PUSHED <gap id> (difficulty N/10)`. Do not open PRs from this agent.
 
+## lease first (Justin, 2026-11-28)
+
+**Rule.** Before working a unit, lease it with the sanctioned tool:
+
+```
+tools/pnp.sh next --another
+tools/pnp.sh next --proof-of <unit>
+tools/pnp.sh next --unit <id>
+```
+
+Up to **five** leases held. Leased steps pay ~50 vs floor 10 unleased.
+Prefer **high-weight** rows and **mono6-screened-orbits** (`False: for the
+monotone six-input f with table …`). Renew with `tools/pnp.sh beat <unit>`
+every 5 minutes. If you cannot finish inside the 15+5 cap, release
+(`out_of_time` / `other`) or let the lease lapse — do not sit on a dead
+unit. `export PNP_MODEL=…` on every `next`.
+
+`--proof-of` is for a unit you already have a checked proof of. `--unit`
+takes that exact id when the desk will lease it. First take has no
+`--another`; further takes use `--another`.
+
+## refute route (Justin, 2026-11-28)
+
+**Rule.** For a find/check row whose statement is false, **do not** push
+`¬ S` under that find gap (CI kind is check; 25584/25609/25652). Get the
+negated twin from the desk and prove **that** unit:
+
+```
+tools/pnp.sh next --kind refute
+tools/pnp.sh next --kind refute --another
+```
+
+The refute unit has its own id, statement, and `imports` whitelist.
+Prove the posted refute statement (or `¬` of its recorded S if the desk
+kind is `refute`). Still only import Mathlib + **that** row's listed
+modules. Do not import a lemma the twin does not list.
+
+**Failed pattern (do not repeat).** Pushing `¬` on `L-meta-25584` (#48313
+REJECTED statement), `L-meta-25609`, `L-meta-25652` (#48521 REFUSED
+import). The lower-bound lemmas were right; the gap and the imports were
+wrong. Lease the desk's refute twin instead.
+
 ## desk kind is the checker kind (do not negate find/check rows)
 
 **Rule.** Intake / authoritative CI fetch
@@ -35,15 +77,11 @@ is `¬ (posted)` is refused locally.
 - `L-meta-25609` (2/10) and `L-meta-25652` (2/10): same mistake (find rows,
   reverse of 25593 / 25645). Do not push more of these.
 
-**What the repo actually allows when a find statement is false** (do not
-use without telling the owner): see the note at the end of this file.
-This hunt does not hold leases, so skip those rows and move on.
-
 **How to spot a real refute twin.** Desk row `kind` is the string
-`refute`, or the posted statement is already the negated twin the desk
-listed (prove that text as **check**, do not wrap another `¬`). Titles
-like “Find a … below the bound” with `find: true` are **check**, not
-refute.
+`refute`, or `tools/pnp.sh next --kind refute` handed you the negated
+twin. The posted statement on that twin is what you prove. Titles like
+“Find a … below the bound” with `find: true` are **check**, not refute:
+lease the refute twin, do not wrap `¬` on the find file.
 
 ## desk `imports` is the CI whitelist
 
@@ -158,14 +196,15 @@ misses them.
 | Family | How to spot | Notes |
 | --- | --- | --- |
 | one-NOT leftovers | title “one not saves nothing”; `one NOT` / leftover NOT on a mask | generator |
-| mono6 orbit twins | “monotone six-input f with table `N * 2^32 + M`”; `HasCircuitSize 6` + giant `testBit` word | thousands of orbit copies |
+| mono6 Table 2 farm | title “Table 2:” + monotone six-input | generator; skip |
+| mono6-screened-orbits | title “False: for the monotone six-input f with table …” | **prefer / lease** (not a skip); posted is already `¬ (∀ s, …)` |
 | packed-good 25842–25851 | “counted gates for four row masks …”; ids `L-meta-25842`–`25851` | skip the whole farm |
 | one-a-side | title “one-a-side” / “one a side”; `RepSizeAtMost` on a small mask with that promise in the title | `gen_oneaside.py` |
 | table 2 | title “table 2” | generator |
 | 7-cycle 10-gate | “7-cycle edges” | farm |
 | two-lit H-on-6 | “two-lit function of the graph H on 6 points with mask …” | family |
 | L-pcx-189 | Res(2) PHP 4/3 upper bound | tight 7/10, drop |
-| find below a merged lb | `find: true` existence strictly smaller than a merged lower bound | not a PR; skip |
+| find below a merged lb | `find: true` existence strictly smaller than a merged lower bound | do not push `¬` on the find gap; `pnp.sh next --kind refute` |
 
 Also skip: NestedCover / ReadsBack research, TM2, Gaussian/Poisson, Walsh/CRT
 reconstruction libs, PHP **lower** bounds (`no refutation has at most …`),
@@ -187,32 +226,28 @@ and conjectures.
 - `check-lean` may sit on a stale `lean/.lake/check.lock` (mkdir lock,
   60 min stale). If the checker stays on `started` with no lake child,
   remove the empty lock dir and rerun.
-- No leases / no `/desk/next`. No tokens in logs. One Lean file per proof
-  branch.
+- Lease first (`pnp.sh next` / `--another` / `--proof-of` / `--unit`),
+  up to 5. Prefer high-weight and mono6-screened-orbits. Beat every 5
+  minutes. Release if past the 15+5 cap. No tokens in logs. One Lean
+  file per proof branch.
 
-## sanctioned path for a false find/check row (do not use without telling)
+## sanctioned path for a false find/check row
 
 Checked `.github/scripts/outside-guard.mjs`,
 `.github/workflows/authoritative.yml`, `CONTRIBUTING.md`, `README.md`,
 `tools/pnp.sh`, and join.txt.
 
-There is **no** PR/checker path that submits `¬ S` for a find/check row.
-`checkGap` maps missing/`check` kind to checker `check`, and a run of
-kind `refute` on that row is refused (`as kind check`). Intake leaves
-`KIND` empty; the workflow uses `${KIND:-check}`. `find: true` is not
-read as refute. Reductions (`R_<gap>_<n>.lean`) are only judged when
-`reductions: true` **and** the step is posted to be proved (kind check),
-and the theorem’s conclusion is still S, not `¬ S`. `dead: []` on the
-row is prior failed-attempt context, not a submit path.
+There is **no** PR/checker path that submits `¬ S` under a find/check
+gap. `checkGap` maps missing/`check` kind to checker `check`; a run of
+kind `refute` on that row is refused (`as kind check`). `find: true` is
+not read as refute.
+
+**Justin-approved route:** `tools/pnp.sh next --kind refute` leases the
+desk's negated twin (a separate unit). Prove that twin's posted
+statement, obeying **its** imports whitelist. Optional: release the find
+row `statement_seems_false` only if you hold its lease and are not
+taking the twin.
 
 join.txt: prove exactly the posted statement; **refute** kind means prove
-the negated twin listed beside the unit (a separate desk-posted
-refutation). Search empty range → `pnp.sh release exhausted`.
-
-The only documented agent-facing way to say “this find statement is
-false” is **not a proof PR**: if you hold a lease, `tools/pnp.sh release
-<unit> statement_seems_false` (or `hypothesis_too_weak`). CONTRIBUTING.md
-§5 and README say the same: do not change the statement; release it.
-This hunt does not take leases, so that path is unused here. Do not
-release, do not open a refute PR against a check row, and do not invent
-a dead/refuted file kind.
+the negated twin listed beside the unit. Search empty range →
+`pnp.sh release exhausted`.

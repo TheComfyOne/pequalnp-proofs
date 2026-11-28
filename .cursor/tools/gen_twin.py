@@ -817,7 +817,8 @@ def main() -> int:
             if not t.get("pushable"):
                 print(
                     f"gen_twin: skip {t['id']} ({t.get('why')}); "
-                    "would negate a check/find row",
+                    "would negate a check/find row — lease the twin with "
+                    "tools/pnp.sh next --kind refute",
                     file=sys.stderr,
                 )
                 continue
