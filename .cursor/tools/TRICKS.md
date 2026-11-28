@@ -18,12 +18,23 @@ tools/pnp.sh next --proof-of <unit>
 tools/pnp.sh next --unit <id>
 ```
 
-Up to **five** leases held. Leased steps pay ~50 vs floor 10 unleased.
-Prefer **high-weight** rows and **mono6-screened-orbits** (`False: for the
-monotone six-input f with table …`). Renew with `tools/pnp.sh beat <unit>`
-every 5 minutes. If you cannot finish inside the 15+5 cap, release
-(`out_of_time` / `other`) or let the lease lapse — do not sit on a dead
-unit. `export PNP_MODEL=…` on every `next`.
+Hold at most **two** leases (the generator shares the desk cap of 4).
+Leased steps pay ~50 vs floor 10 unleased. Prefer **high-weight** rows
+and **mono6-screened-orbits** (`False: for the monotone six-input f with
+table …`).
+
+**Lease efficiency.** GET the desk row
+(`https://pequalnp-desk.pequalnp.workers.dev/desk/row?gap=ID`) and read
+title, statement, sketch, imports, and `kind` **before** `pnp.sh next`.
+Only lease a unit you judge doable in the 15+5 cap. Do not lease the
+one-NOT refute farm (`L-meta-35503` / `35663` style: “Can one NOT gate
+shorten edge detection…”). `next --kind refute` without a chosen id
+hands those out; skip them.
+
+Renew with `tools/pnp.sh beat <unit>` every 5 minutes. If you cannot
+finish inside the 15+5 cap, release (`out_of_time` / `other`) or let the
+lease lapse — do not sit on a dead unit. `export PNP_MODEL=…` on every
+`next`.
 
 `--proof-of` is for a unit you already have a checked proof of. `--unit`
 takes that exact id when the desk will lease it. First take has no
