@@ -1,12 +1,16 @@
 # Hunt playbook (TheComfyOne)
 
 Read this file at the start of every run. After a push, add the pattern that
-won it. This file lives on **fork `main` only** (`.cursor/` never goes on a
-proof branch). Proof branches are still cut from `upstream/main` as
-`git checkout -b <gap id> upstream/main`.
+won it. Script catalog: `.cursor/tools/README.md`. Shared checks:
+`.cursor/tools/pnplib.py`. This file lives on **fork `main` only** (`.cursor/`
+never goes on a proof branch). Proof branches are still cut from
+`upstream/main` as `git checkout -b <gap id> upstream/main`.
 
 Push only via `.cursor/tools/new_steps.sh --push FILE`. Print
 `PUSHED <gap id> (difficulty N/10)`. Do not open PRs from this agent.
+
+Identity: `TheComfyOne` /
+`210307828+TheComfyOne@users.noreply.github.com` as both author and committer.
 
 ## lease first (Justin, 2026-11-28)
 
@@ -72,9 +76,9 @@ row with `find: true` has **no** `kind: refute` field, so CI judges it as
 `check-lean.mjs FILE STMT refute` saying ACCEPTED only means we passed
 `refute` ourselves; CI does not take that argument from us.
 
-`gen_twin.py` and `precheck.sh` must GET that row and use **its** kind.
-`check-lean` is called with the desk kind. Refute-by-lower-bound (theorem
-`¬ posted`) is emitted **only** when the desk posts the step as a
+`gen_twin.py` and `precheck.sh` (via `pnplib.py`) GET that row and use
+**its** kind. `check-lean` is called with the desk kind. Refute-by-lower-bound
+(theorem `¬ posted`) is emitted **only** when the desk posts the step as a
 refutation. Otherwise only prove-by-witness / symmetry / special-case
 templates that prove the posted statement. A check/find file whose theorem
 is `¬ (posted)` is refused locally.
@@ -207,7 +211,7 @@ misses them.
 | Family | How to spot | Notes |
 | --- | --- | --- |
 | one-NOT leftovers | title “one not saves nothing”; `one NOT` / leftover NOT on a mask | generator |
-| mono6 Table 2 farm | title “Table 2:” + monotone six-input | generator; skip |
+| mono6 Table 2 farm | title “Table 2:” + monotone six-input | `gen_mono6.py`; skip hand hunt |
 | mono6-screened-orbits | title “False: for the monotone six-input f with table …” | **prefer / lease** (not a skip); posted is already `¬ (∀ s, …)` |
 | packed-good 25842–25851 | “counted gates for four row masks …”; ids `L-meta-25842`–`25851` | skip the whole farm |
 | one-a-side | title “one-a-side” / “one a side”; `RepSizeAtMost` on a small mask with that promise in the title | `gen_oneaside.py` |
@@ -220,48 +224,6 @@ misses them.
 Also skip: NestedCover / ReadsBack research, TM2, Gaussian/Poisson, Walsh/CRT
 reconstruction libs, PHP **lower** bounds (`no refutation has at most …`),
 and conjectures.
-
-## other operating notes
-
-- Ranker: `.cursor/tools/rank_gaps.py --gh --kind lib,pcx|meta --max-diff 5`.
-  Twin sweep runs first (`--twins-only` to print just those). Prefer
-  **cheap finite / `decide` / small explicit instances** over newest
-  rows when the newest look research-scale. Re-check meta/pcx scored 1–5.
-- Identity: `TheComfyOne` / `210307828+TheComfyOne@users.noreply.github.com`
-  as both author and committer.
-- Snapshot `/tmp/CircuitKit.lean` before any `new_proof.sh` checkout; kit
-  is missing on `upstream/main`.
-- `cadical` has no `--time`; use `-t N`. Do not pass a second filename
-  (that writes a binary proof). `decide` is allowed; `native_decide` is not.
-- Desk `pr_open` lags GitHub; always `gh pr list` at start and before push.
-- `check-lean` may sit on a stale `lean/.lake/check.lock` (mkdir lock,
-  60 min stale). If the checker stays on `started` with no lake child,
-  remove the empty lock dir and rerun.
-- Lease first (`pnp.sh next` / `--another` / `--proof-of` / `--unit`),
-  up to 5. Prefer high-weight and mono6-screened-orbits. Beat every 5
-  minutes. Release if past the 15+5 cap. No tokens in logs. One Lean
-  file per proof branch.
-
-## sanctioned path for a false find/check row
-
-Checked `.github/scripts/outside-guard.mjs`,
-`.github/workflows/authoritative.yml`, `CONTRIBUTING.md`, `README.md`,
-`tools/pnp.sh`, and join.txt.
-
-There is **no** PR/checker path that submits `¬ S` under a find/check
-gap. `checkGap` maps missing/`check` kind to checker `check`; a run of
-kind `refute` on that row is refused (`as kind check`). `find: true` is
-not read as refute.
-
-**Justin-approved route:** `tools/pnp.sh next --kind refute` leases the
-desk's negated twin (a separate unit). Prove that twin's posted
-statement, obeying **its** imports whitelist. Optional: release the find
-row `statement_seems_false` only if you hold its lease and are not
-taking the twin.
-
-join.txt: prove exactly the posted statement; **refute** kind means prove
-the negated twin listed beside the unit. Search empty range →
-`pnp.sh release exhausted`.
 
 ## Table 2 / mono6 generator (working, 2026-11-28)
 
@@ -287,3 +249,40 @@ Local e2e, no lease: L-meta-40217 ACCEPTED (gen 10s, lake 101s, checker
 115s, 237209 B). `--sat-timeout` default 90s. Difficulty 4/10 once the
 generator exists (SAT + ~100s Lean). Cut the proof branch from
 `upstream/main`; do not put `.cursor/` on the PR.
+
+## other operating notes
+
+- Ranker: `.cursor/tools/rank_gaps.py --gh --kind lib,pcx|meta --max-diff 5`.
+  Twin sweep runs first (`--twins-only` to print just those). Prefer
+  **cheap finite / `decide` / small explicit instances** over newest
+  rows when the newest look research-scale. Re-check meta/pcx scored 1–5.
+- Snapshot `/tmp/CircuitKit.lean` before any `new_proof.sh` checkout; kit
+  is missing on `upstream/main`.
+- `cadical` has no `--time`; use `-t N`. Do not pass a second filename
+  (that writes a binary proof). `decide` is allowed; `native_decide` is not.
+- Desk `pr_open` lags GitHub; always `gh pr list` at start and before push.
+- `check-lean` may sit on a stale `lean/.lake/check.lock` (mkdir lock,
+  60 min stale). If the checker stays on `started` with no lake child,
+  remove the empty lock dir and rerun.
+- No tokens in logs. One Lean file per proof branch.
+
+## sanctioned path for a false find/check row
+
+Checked `.github/scripts/outside-guard.mjs`,
+`.github/workflows/authoritative.yml`, `CONTRIBUTING.md`, `README.md`,
+`tools/pnp.sh`, and join.txt.
+
+There is **no** PR/checker path that submits `¬ S` under a find/check
+gap. `checkGap` maps missing/`check` kind to checker `check`; a run of
+kind `refute` on that row is refused (`as kind check`). `find: true` is
+not read as refute.
+
+**Justin-approved route:** `tools/pnp.sh next --kind refute` leases the
+desk's negated twin (a separate unit). Prove that twin's posted
+statement, obeying **its** imports whitelist. Optional: release the find
+row `statement_seems_false` only if you hold its lease and are not
+taking the twin.
+
+join.txt: prove exactly the posted statement; **refute** kind means prove
+the negated twin listed beside the unit. Search empty range →
+`pnp.sh release exhausted`.

@@ -116,10 +116,14 @@ poll_once() {
   export NEW_STEPS_TITLES="${titles_path}"
   export NEW_STEPS_SEED="${SEED}"
   export NEW_STEPS_REPO="${REPO}"
+  export NEW_STEPS_TOOLS="${ROOT}/.cursor/tools"
 
   python3 - <<'PY'
 import json, os, re, sys
 from datetime import datetime, timezone
+
+sys.path.insert(0, os.environ["NEW_STEPS_TOOLS"])
+from pnplib import title_claims_gap  # noqa: E402
 
 status_path = os.environ["NEW_STEPS_STATUS"]
 seen_path = os.environ["NEW_STEPS_SEEN"]
@@ -158,12 +162,7 @@ with open(titles_path, encoding="utf-8", errors="replace") as f:
 titles_l = [t.lower() for t in titles]
 
 def claimed(gid: str) -> bool:
-    g = gid.lower()
-    alt = g.replace("-", "_")
-    for t in titles_l:
-        if g in t or alt in t:
-            return True
-    return False
+    return title_claims_gap(gid, titles_l)
 
 fresh = []
 now_ids = []

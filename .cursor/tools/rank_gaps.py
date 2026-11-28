@@ -37,17 +37,24 @@ import os
 import re
 import subprocess
 import sys
-import urllib.request
 from pathlib import Path
 
-STATUS_URL = os.environ.get("STATUS_URL", "https://pequalnp.com/desk/status")
-GAPS_URL = os.environ.get(
-    "GAPS_URL", "https://data.pequalnp.com/data/desk/gaps.json"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from pnplib import (  # noqa: E402
+    GAPS_URL,
+    STATUS_URL,
+    THM_START,
+    checker_kind,
+    fetch_json,
+    gh_open_titles,
+    import_lemma_ids,
+    is_find_row,
+    last_theorem_type,
+    lean_path,
+    module_to_gap,
+    posted_is_negation,
+    row_allows_lemma,
 )
-ROW_URL = os.environ.get(
-    "ROW_URL", "https://pequalnp-desk.pequalnp.workers.dev/desk/row?gap="
-)
-REPO = os.environ.get("REPO", "open-goat/pequalnp-proofs")
 
 SKIP_TITLE = re.compile(
     r"table 2\b|one not saves nothing|one-a-side|one a side"
@@ -70,77 +77,7 @@ CIRCUIT_EXISTS = re.compile(
     re.S,
 )
 FIN_SMALL = re.compile(r"Fin ([1-8])")
-THM_START = "theorem PEqualNP.Outside."
 CMP_OPS = ("≤", "<", "≥", ">")
-
-
-def fetch_json(url: str):
-    req = urllib.request.Request(url, headers={"User-Agent": "rank-gaps/1"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.load(r)
-
-
-def fetch_desk_row(gid: str) -> dict | None:
-    """One gap as the intake reads it (GET /desk/row?gap=ID)."""
-    try:
-        blob = fetch_json(ROW_URL + gid)
-    except Exception:
-        return None
-    for g in blob.get("gaps") or []:
-        if g.get("id") == gid:
-            return g
-    return None
-
-
-def checker_kind(g: dict | None) -> str:
-    """Match outside-guard.mjs + intake: find:true and missing kind are check."""
-    if not g:
-        return "check"
-    k = g.get("kind")
-    if k == "refute":
-        return "refute"
-    if k == "reduce":
-        return "reduce"
-    if k == "value":
-        return "check"
-    return "check"
-
-
-def is_find_row(g: dict | None) -> bool:
-    return bool(g and g.get("find") is True)
-
-
-def posted_is_negation(stmt: str) -> bool:
-    s = (stmt or "").lstrip()
-    return s.startswith("¬") or s.startswith("(¬")
-
-
-def file_to_gap(rel: str) -> str | None:
-    """lean/PEqualNP/Outside/L_meta_25584.lean -> L-meta-25584."""
-    stem = Path(rel).stem
-    if not stem.startswith("L_"):
-        return None
-    return "L-" + stem[2:].replace("_", "-")
-
-
-def last_theorem_type_of_text(text: str) -> str | None:
-    """Type of the last `theorem PEqualNP.Outside.` in a Lean file."""
-    return last_theorem_type(text)
-
-
-def theorem_wraps_posted(thm_type: str, posted: str) -> bool:
-    """True when the theorem is ¬ posted (extra wrapper), not posted itself."""
-    if not thm_type or not posted:
-        return False
-    if posted_is_negation(posted):
-        return False
-    t = thm_type.lstrip()
-    if not (t.startswith("¬") or t.startswith("(¬")):
-        return False
-    tn = re.sub(r"\s+", "", t)
-    pn = re.sub(r"\s+", "", posted)
-    return pn in tn
-
 
 HCS_RE = re.compile(
     r"HasCircuitSize\s+(\d+)\s+\(\s*(fun\b[\s\S]*?)\)\s+(\d+)"
@@ -211,19 +148,6 @@ def lane(gid: str) -> str:
     if gid.startswith("L-clb-"):
         return "clb"
     return "other"
-
-
-def gap_to_module(gid: str) -> str:
-    return gid.replace("L-", "L_").replace("-", "_")
-
-
-def module_to_gap(mod: str) -> str:
-    body = mod[2:] if mod.startswith("L_") else mod
-    return "L-" + body.replace("_", "-")
-
-
-def lean_path(root: Path, gid: str) -> Path:
-    return root / "lean" / "PEqualNP" / "Outside" / f"{gap_to_module(gid)}.lean"
 
 
 def sibling_path(root: Path, gid: str) -> Path | None:
@@ -310,42 +234,6 @@ def difficulty(g: dict, root: Path) -> tuple[int, str]:
 
     d = max(1, min(10, d))
     return d, ",".join(reasons) or "base"
-
-
-def gh_open_titles(ids: list[str]) -> set[str]:
-    """Return gap ids that already have an open PR whose title contains the id."""
-    hit = set()
-    for gid in ids:
-        try:
-            p = subprocess.run(
-                [
-                    "gh",
-                    "pr",
-                    "list",
-                    "-R",
-                    REPO,
-                    "--search",
-                    f"{gid} in:title",
-                    "--state",
-                    "open",
-                    "--json",
-                    "number,title",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            continue
-        if p.returncode != 0:
-            continue
-        try:
-            rows = json.loads(p.stdout or "[]")
-        except json.JSONDecodeError:
-            continue
-        if rows:
-            hit.add(gid)
-    return hit
 
 
 def git_out(root: Path, args: list[str], timeout: int = 60) -> str:
@@ -457,23 +345,6 @@ def new_merged_lean(root: Path, last_sha: str, head: str) -> list[Path]:
         if p.is_file() and p.parent == outside:
             out.append(p)
     return out
-
-
-def last_theorem_type(text: str) -> str | None:
-    idx = text.rfind(THM_START)
-    if idx < 0:
-        return None
-    rest = text[idx:]
-    m = re.search(r"\s:= by\b", rest)
-    if not m:
-        m = re.search(r"\n\s*:= by\b", rest)
-    if not m:
-        return None
-    head = rest[: m.start()]
-    colon = head.find(":")
-    if colon < 0:
-        return None
-    return head[colon + 1 :].strip()
 
 
 def last_inequality(text: str) -> tuple[str, str, str] | None:
@@ -603,48 +474,6 @@ def lemma_record_at(root: Path, rev: str, rel: str) -> dict | None:
     if not tail:
         return None
     return lemma_record_from_tail(tail, stem, rel)
-
-
-def import_lemma_ids(imports: list) -> list[str]:
-    out = []
-    for imp in imports or []:
-        # imports look like PEqualNP.Outside.L_meta_25534
-        m = re.search(r"(L_[A-Za-z]+_\d+)\s*$", str(imp))
-        if m:
-            out.append(module_to_gap(m.group(1)))
-    return out
-
-
-def lemma_module_name(gid: str) -> str:
-    return f"PEqualNP.Outside.{gap_to_module(gid)}"
-
-
-def row_allows_lemma(row: dict, lemma_id: str) -> bool:
-    """True when the desk lists the lemma's module (CI import whitelist)."""
-    listed = {str(x) for x in (row.get("imports") or [])}
-    return lemma_module_name(lemma_id) in listed
-
-
-def parse_import_names(text: str) -> list[str]:
-    """Leading `import M` lines, same shape as outside-guard.mjs."""
-    names: list[str] = []
-    rx = re.compile(
-        r"^import ([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*)[ \t]*$"
-    )
-    for line in (text or "").splitlines():
-        if not line.strip():
-            continue
-        m = rx.match(line)
-        if not m:
-            break
-        names.append(m.group(1))
-    return names
-
-
-def import_is_allowed(name: str, listed: list | set) -> bool:
-    if name == "Mathlib" or name.startswith("Mathlib."):
-        return True
-    return name in set(listed or [])
 
 
 def find_twins(
@@ -944,8 +773,8 @@ def main() -> int:
         ).strip()
     )
 
-    status = json.load(open(args.status)) if args.status else fetch_json(STATUS_URL)
-    gaps_blob = json.load(open(args.gaps)) if args.gaps else fetch_json(GAPS_URL)
+    status = json.load(open(args.status)) if args.status else fetch_json(STATUS_URL, ua="rank-gaps/1")
+    gaps_blob = json.load(open(args.gaps)) if args.gaps else fetch_json(GAPS_URL, ua="rank-gaps/1")
     by_id = {g["id"]: g for g in (gaps_blob.get("gaps") or []) if g.get("id")}
 
     twins: list[dict] = []

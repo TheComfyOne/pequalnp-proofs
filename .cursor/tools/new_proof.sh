@@ -64,26 +64,20 @@ done
 write_skeleton() {
   python3 - "${ROOT}" "${GAP_ID}" "${JSON}" "${STATEMENT}" "${IMPORTS}" "${TITLE}" "${KIT}" "${KIND}" "${KIT_ALL}" "${KIT_USE}" <<'PY'
 import json, os, re, sys
+from pathlib import Path
 root, gid, json_path, statement, imports, title, kit_path, kind, kit_all, kit_use = sys.argv[1:]
+sys.path.insert(0, os.path.join(root, ".cursor", "tools"))
+import pnplib  # noqa: E402
 
-def load_json(path):
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-data = None
-for p in ([json_path] if json_path else []) + [os.path.join(root, ".pnp", gid + ".json")]:
-    if p and os.path.isfile(p):
-        data = load_json(p)
-        break
-
-g = {}
-if isinstance(data, dict):
-    g = data.get("gap") if isinstance(data.get("gap"), dict) else data
+data = pnplib.load_json_file(json_path) if json_path else None
+if data is None:
+    data = pnplib.load_pnp_step(Path(root), gid)
+g = pnplib.step_gap(data)
 
 if not re.fullmatch(r"[LR]-[A-Za-z]+-\d+(?:-\d+)?", gid):
     sys.exit("gap id must look like L-meta-5443")
 
-mod_leaf = gid.replace("-", "_")
+mod_leaf = pnplib.gap_to_module(gid)
 module = (g.get("module") or ("PEqualNP.Outside." + mod_leaf))
 path = g.get("file") or ("lean/PEqualNP/Outside/" + mod_leaf + ".lean")
 if not path.startswith("lean/PEqualNP/Outside/") or ".." in path:

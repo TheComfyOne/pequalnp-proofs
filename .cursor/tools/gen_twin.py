@@ -37,16 +37,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import pnplib  # noqa: E402
 import rank_gaps as rg  # noqa: E402
 
-AUTHOR_NAME = "TheComfyOne"
-AUTHOR_EMAIL = "210307828+TheComfyOne@users.noreply.github.com"
-GIT_ENV = {
-    "GIT_AUTHOR_NAME": AUTHOR_NAME,
-    "GIT_AUTHOR_EMAIL": AUTHOR_EMAIL,
-    "GIT_COMMITTER_NAME": AUTHOR_NAME,
-    "GIT_COMMITTER_EMAIL": AUTHOR_EMAIL,
-}
+AUTHOR_NAME = pnplib.AUTHOR_NAME
+AUTHOR_EMAIL = pnplib.AUTHOR_EMAIL
+GIT_ENV = pnplib.GIT_ENV
 
 
 def die(msg: str, code: int = 1) -> None:
@@ -312,23 +308,11 @@ def rintro_names(binders: list[str], n_hyps: int) -> str:
 
 
 def import_header(listed: list[str]) -> str:
-    """Mathlib, then the desk row's listed modules in order. Nothing else."""
-    lines = ["import Mathlib"]
-    seen = {"Mathlib"}
-    for m in listed or []:
-        if not m or m in seen:
-            continue
-        if m.startswith("Mathlib."):
-            lines.append(f"import {m}")
-            seen.add(m)
-            continue
-        lines.append(f"import {m}")
-        seen.add(m)
-    return "\n".join(lines) + "\n\n"
+    return pnplib.import_header(listed)
 
 
 def require_listed_lemma(gid: str, lemma_id: str, listed: list[str]) -> str:
-    mod = rg.lemma_module_name(lemma_id)
+    mod = pnplib.lemma_module_name(lemma_id)
     if mod not in set(listed or []):
         die(
             f"desk row {gid} does not list {mod}; "
@@ -500,7 +484,7 @@ def choose_template(
     if p_ineq and l_ineq and rg.ineq_reverse(l_ineq, p_ineq):
         if desk_kind == "refute":
             return "refute", "rev-ineq"
-        if rg.posted_is_negation(posted):
+        if pnplib.posted_is_negation(posted):
             return "check", "rev-ineq-posted-neg"
         die(
             "rev-ineq on a check/find row; will not emit ¬ of the posted "
@@ -517,7 +501,7 @@ def choose_template(
     if k_post is not None and l_ineq and l_ineq[1] == "≤" and "C.size" in l_ineq[2]:
         if desk_kind == "refute":
             return "refute", "instantiate-size"
-        if rg.posted_is_negation(posted):
+        if pnplib.posted_is_negation(posted):
             return "check", "instantiate-posted-neg"
         die(
             "instantiate-size on a check/find row; will not emit ¬ of the "
@@ -537,8 +521,8 @@ def emit_file(
     wrap: bool = True,
     listed: list[str] | None = None,
 ) -> str:
-    gap_mod = rg.gap_to_module(gid)
-    lemma_mod = rg.gap_to_module(lemma_id)
+    gap_mod = pnplib.gap_to_module(gid)
+    lemma_mod = pnplib.gap_to_module(lemma_id)
     header = import_header(listed or [])
     binders, hyps, last = parse_exists(posted)
     f_names, f_hyps, f_last = parse_forall(lemma_typ)
@@ -547,7 +531,7 @@ def emit_file(
 
     if kind in ("witness", "check"):
         # Prove posted as-is. wrap=False when posted is already ¬ S.
-        if kind == "check" and rg.posted_is_negation(posted):
+        if kind == "check" and pnplib.posted_is_negation(posted):
             inner = posted.lstrip()
             if inner.startswith("¬"):
                 inner = inner[1:].strip()
@@ -657,7 +641,7 @@ def ensure_branch(root: Path, gid: str) -> None:
 
 
 def write_lean(root: Path, gid: str, text: str) -> Path:
-    path = rg.lean_path(root, gid)
+    path = pnplib.lean_path(root, gid)
     path.parent.mkdir(parents=True, exist_ok=True)
     if '"' in text:
         die("template produced a double quote; refusing to write")
@@ -667,7 +651,7 @@ def write_lean(root: Path, gid: str, text: str) -> Path:
 
 
 def lake_build(root: Path, gid: str) -> None:
-    mod = f"PEqualNP.Outside.{rg.gap_to_module(gid)}"
+    mod = f"PEqualNP.Outside.{pnplib.gap_to_module(gid)}"
     print(f"gen_twin: lake build {mod}", file=sys.stderr)
     p = run(
         ["lake", "build", mod],
@@ -679,7 +663,7 @@ def lake_build(root: Path, gid: str) -> None:
     sys.stderr.write(p.stderr or "")
     if p.returncode != 0:
         die(
-            f"lake build failed for {mod}. Hand-edit {rg.lean_path(root, gid)} and rerun.",
+            f"lake build failed for {mod}. Hand-edit {pnplib.lean_path(root, gid)} and rerun.",
             p.returncode,
         )
 
@@ -732,19 +716,19 @@ def process_one(
     do_build: bool,
     do_check: bool,
 ) -> None:
-    row = rg.fetch_desk_row(gid) or by_id.get(gid) or {}
-    desk_kind = rg.checker_kind(row)
-    find = rg.is_find_row(row)
+    row = pnplib.fetch_desk_row(gid) or by_id.get(gid) or {}
+    desk_kind = pnplib.checker_kind(row)
+    find = pnplib.is_find_row(row)
     posted = (row.get("statement") or "").strip() or gap_stmt(by_id, gid)
     if '"' in posted:
         die(f"gap {gid} statement contains a string literal; template will not emit quotes")
-    lemma_path = rg.lean_path(root, lemma_id)
+    lemma_path = pnplib.lean_path(root, lemma_id)
     if not lemma_path.is_file():
         die(f"merged lemma file missing: {lemma_path}")
     rec = rg.lemma_record(lemma_path)
     if not rec or not rec.get("type"):
         die(f"could not read last theorem of {lemma_id}")
-    listed = [str(x) for x in (row.get("imports") or [])]
+    listed = pnplib.listed_imports(row)
     print(
         f"gen_twin: desk {gid} kind={desk_kind} find={find} imports={listed}",
         file=sys.stderr,
@@ -761,14 +745,14 @@ def process_one(
     text = emit_file(
         kind, gid, lemma_id, posted, rec["type"], wrap=wrap, listed=listed
     )
-    for name in rg.parse_import_names(text):
-        if not rg.import_is_allowed(name, listed):
+    for name in pnplib.parse_import_names(text):
+        if not pnplib.import_is_allowed(name, listed):
             die(
                 f"template import {name} is not allowed "
                 f"(only Mathlib and {listed})"
             )
-    if rg.theorem_wraps_posted(
-        rg.last_theorem_type_of_text(text) or "", posted
+    if pnplib.theorem_wraps_posted(
+        pnplib.last_theorem_type_of_text(text) or "", posted
     ) and desk_kind != "refute":
         die(
             f"template wrapped ¬ around posted statement of check/find row {gid}"
@@ -804,12 +788,12 @@ def main() -> int:
     root = Path(
         subprocess.check_output(["git", "rev-parse", "--show-toplevel"], text=True).strip()
     )
-    gaps_blob = rg.fetch_json(rg.GAPS_URL)
+    gaps_blob = pnplib.fetch_json(pnplib.GAPS_URL, ua="rank-gaps/1")
     by_id = {g["id"]: g for g in (gaps_blob.get("gaps") or []) if g.get("id")}
 
     jobs: list[tuple[str, str, str]] = []
     if args.from_rank:
-        status = rg.fetch_json(rg.STATUS_URL)
+        status = pnplib.fetch_json(pnplib.STATUS_URL, ua="rank-gaps/1")
         last = rg.read_last_sha(root)
         head = rg.ensure_upstream(root, fetch=True)
         twins = rg.find_twins(root, status, by_id, last, head, kinds=None)
@@ -850,7 +834,7 @@ def main() -> int:
     for gid, lemma_id, kind in jobs:
         # Skip if an open GitHub PR already exists at start.
         if not args.dry_run:
-            blocked = rg.gh_open_titles([gid])
+            blocked = pnplib.gh_open_titles([gid])
             if gid in blocked:
                 print(f"gen_twin: skip {gid}, open PR already", file=sys.stderr)
                 continue

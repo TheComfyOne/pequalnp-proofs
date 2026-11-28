@@ -4,7 +4,7 @@
 Emits a non-inductive Lean file in the shape of merged L-meta-40217 (PR 48392)
 and L-meta-40417 (PR 48185): a 10-gate AND/OR witness plus a kernel-checked
 search certificate that no 8-binary-gate AND/OR/ANDNOT circuit hits the packed
-goal. See .cursor/TRICKS.md.
+goal. See .cursor/tools/TRICKS.md.
 
     python3 .cursor/tools/gen_mono6.py \\
         --id L-meta-40217 --hi 4276808426 --lo 4272482952 \\
