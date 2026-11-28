@@ -326,10 +326,22 @@ def last_inequality(text: str) -> tuple[str, str, str] | None:
     best_idx = -1
     best_op = ""
     for op in CMP_OPS:
-        idx = text.rfind(op)
-        if idx > best_idx:
-            best_idx = idx
-            best_op = op
+        start = len(text)
+        while True:
+            idx = text.rfind(op, 0, start)
+            if idx < 0:
+                break
+            # Do not treat Lean `=>` as a comparison.
+            if op == ">" and idx > 0 and text[idx - 1] == "=":
+                start = idx
+                continue
+            if op == "<" and idx + 1 < len(text) and text[idx + 1] == "=":
+                start = idx
+                continue
+            if idx > best_idx:
+                best_idx = idx
+                best_op = op
+            break
     if best_idx < 0:
         return None
     left = text[:best_idx]
@@ -543,16 +555,7 @@ def find_twins(
 
     # Full reverse-ineq pass over Outside for still-open Find/beating rows
     # whose lemma may have merged before this loop's window.
-    find_rows = [
-        r
-        for r in open_rows
-        if r["ineq"]
-        and (
-            (r["title"] or "").lower().startswith("find")
-            or "below" in (r["title"] or "").lower()
-            or "beating" in (r["title"] or "").lower()
-        )
-    ]
+    find_rows = [r for r in open_rows if r["ineq"]]
     if find_rows:
         need = {(norm_expr(r["ineq"][2]), norm_expr(r["ineq"][0])): r for r in find_rows if r["ineq"]}
         outside = root / "lean" / "PEqualNP" / "Outside"
