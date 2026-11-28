@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Emit, build, and optionally push a twin-pair proof from a fixed template.
 
-Takes an open gap id plus the merged lemma that settles it:
+Takes an open gap id plus the merged lemma that settles it. Kind is the
+desk row (GET /desk/row?gap=ID), not a flag we pick:
 
-  refute   too-small bound  -> ¬ posted, apply the lower-bound lemma
-  witness  bound >= construction -> posted, apply the witness lemma
+  desk kind refute -> ¬ posted, apply the lower-bound lemma
+  otherwise        -> posted, apply a witness / symmetry / special-case
 
-Hand-edit only if the one lake build fails.
+Never wrap ¬ around a find/check existence row. Intake judges those as
+check (find: true => check). L-meta-25584 was REJECTED (statement) for
+that. Hand-edit only if the one lake build fails.
 
 Usage:
   .cursor/tools/gen_twin.py L-meta-25652 L-meta-25645
@@ -301,18 +304,26 @@ def rintro_names(binders: list[str], n_hyps: int) -> str:
     return f"⟨{inner}⟩"
 
 
-def emit_refute_reverse(gap_mod: str, lemma_mod: str, posted: str, binders: list[str], n_hyps: int) -> str:
+def emit_refute_reverse(
+    gap_mod: str,
+    lemma_mod: str,
+    posted: str,
+    binders: list[str],
+    n_hyps: int,
+    wrap: bool = True,
+) -> str:
     # binders + (n_hyps conjuncts including last ineq)
     names = binders + [f"h{i}" for i in range(n_hyps - 1)] + (["hlt"] if n_hyps else [])
     apply_args = " ".join(binders + [f"h{i}" for i in range(n_hyps - 1)])
     rintro = ", ".join(names)
+    thm = f"(¬ ({posted}))" if wrap else f"({posted})"
     return (
         "import Mathlib\n"
         "import PEqualNP.Defs\n"
         f"import PEqualNP.Outside.{lemma_mod}\n"
         "\n"
         f"theorem PEqualNP.Outside.{gap_mod} :\n"
-        f"    (¬ ({posted})) := by\n"
+        f"    {thm} := by\n"
         f"  rintro ⟨{rintro}⟩\n"
         f"  have hge := PEqualNP.Outside.{lemma_mod} {apply_args}\n"
         "  exact (not_le_of_gt hlt) hge\n"
@@ -330,6 +341,7 @@ def emit_refute_instantiate(
     lemma_bound: str,
     dims: list[int],
     k: int,
+    wrap: bool = True,
 ) -> str:
     # Map extra Nat binders to Fin dimensions in order.
     nat_binders = []
@@ -385,13 +397,14 @@ def emit_refute_instantiate(
     apply_s = " ".join(lemma_args)
     if size_name is None:
         size_name = "hlt"
+    thm = f"(¬ ({posted}))" if wrap else f"({posted})"
     return (
         "import Mathlib\n"
         "import PEqualNP.Defs\n"
         f"import PEqualNP.Outside.{lemma_mod}\n"
         "\n"
         f"theorem PEqualNP.Outside.{gap_mod} :\n"
-        f"    (¬ ({posted})) := by\n"
+        f"    {thm} := by\n"
         f"  rintro ⟨{rintro}⟩\n"
         f"  have hLower : {bound_term} ≤ C.size :=\n"
         f"    PEqualNP.Outside.{lemma_mod} {apply_s}\n"
@@ -446,15 +459,29 @@ def emit_witness_weaken(
 
 
 def choose_template(
-    kind: str, posted: str, lemma_typ: str
+    kind: str, posted: str, lemma_typ: str, desk_kind: str = "check"
 ) -> tuple[str, str]:
-    """Return (kind, reason) after looking at the two types."""
+    """Return (kind, reason) after looking at the two types and the desk row."""
     if kind != "auto":
+        if kind == "refute" and desk_kind != "refute":
+            die(
+                "refute template refused: desk does not post this step as a "
+                f"refutation (desk kind {desk_kind})"
+            )
         return kind, "cli"
     p_ineq = rg.last_inequality(posted)
     l_ineq = rg.last_inequality(lemma_typ)
     if p_ineq and l_ineq and rg.ineq_reverse(l_ineq, p_ineq):
-        return "refute", "rev-ineq"
+        if desk_kind == "refute":
+            return "refute", "rev-ineq"
+        if rg.posted_is_negation(posted):
+            return "check", "rev-ineq-posted-neg"
+        die(
+            "rev-ineq on a check/find row; will not emit ¬ of the posted "
+            "statement (desk kind "
+            + desk_kind
+            + ")"
+        )
     k_post = size_le(posted)
     k_lem = size_le(lemma_typ)
     if k_post is not None and k_lem is not None and k_post >= k_lem and "∃" in lemma_typ:
@@ -462,11 +489,22 @@ def choose_template(
     if posted.strip() == lemma_typ.strip() or lemma_typ.strip() in posted:
         return "witness", "same-stmt"
     if k_post is not None and l_ineq and l_ineq[1] == "≤" and "C.size" in l_ineq[2]:
-        return "refute", "instantiate-size"
-    return "refute", "default-refute"
+        if desk_kind == "refute":
+            return "refute", "instantiate-size"
+        if rg.posted_is_negation(posted):
+            return "check", "instantiate-posted-neg"
+        die(
+            "instantiate-size on a check/find row; will not emit ¬ of the "
+            f"posted statement (desk kind {desk_kind})"
+        )
+    if desk_kind == "refute":
+        return "refute", "default-refute"
+    return "witness", "default-witness"
 
 
-def emit_file(kind: str, gid: str, lemma_id: str, posted: str, lemma_typ: str) -> str:
+def emit_file(
+    kind: str, gid: str, lemma_id: str, posted: str, lemma_typ: str, wrap: bool = True
+) -> str:
     gap_mod = rg.gap_to_module(gid)
     lemma_mod = rg.gap_to_module(lemma_id)
     binders, hyps, last = parse_exists(posted)
@@ -474,14 +512,28 @@ def emit_file(kind: str, gid: str, lemma_id: str, posted: str, lemma_typ: str) -
     k_post = size_le(posted)
     k_lem = size_le(lemma_typ)
 
-    if kind == "witness":
+    if kind in ("witness", "check"):
+        # Prove posted as-is. wrap=False when posted is already ¬ S.
+        if kind == "check" and rg.posted_is_negation(posted):
+            inner = posted.lstrip()
+            if inner.startswith("¬"):
+                inner = inner[1:].strip()
+            if inner.startswith("(") and inner.endswith(")"):
+                inner = inner[1:-1].strip()
+            ibinders, ihyps, _ilast = parse_exists(inner)
+            if ibinders:
+                return emit_refute_reverse(
+                    gap_mod, lemma_mod, posted, ibinders, len(ihyps) + 1, wrap=False
+                )
         if k_lem is not None and k_post is not None and k_post > k_lem and binders:
             return emit_witness_weaken(
                 gap_mod, lemma_mod, posted, binders, len(hyps) + 1, k_lem, k_post
             )
         return emit_witness_apply(gap_mod, lemma_mod, posted)
 
-    # refute
+    # refute: only when the desk posts the step as a refutation.
+    if not wrap:
+        die("internal: refute template with wrap=False")
     p_ineq = rg.last_inequality(posted)
     l_ineq = rg.last_inequality(lemma_typ)
     if (
@@ -492,7 +544,9 @@ def emit_file(kind: str, gid: str, lemma_id: str, posted: str, lemma_typ: str) -
         and f_names
         and binders == f_names
     ):
-        return emit_refute_reverse(gap_mod, lemma_mod, posted, binders, len(hyps) + 1)
+        return emit_refute_reverse(
+            gap_mod, lemma_mod, posted, binders, len(hyps) + 1, wrap=True
+        )
 
     dims = fin_dims(posted)
     if binders and k_post is not None and dims and f_names:
@@ -511,10 +565,13 @@ def emit_file(kind: str, gid: str, lemma_id: str, posted: str, lemma_typ: str) -
             bound,
             dims,
             k_post,
+            wrap=True,
         )
 
     if binders:
-        return emit_refute_reverse(gap_mod, lemma_mod, posted, binders, max(1, len(hyps) + 1))
+        return emit_refute_reverse(
+            gap_mod, lemma_mod, posted, binders, max(1, len(hyps) + 1), wrap=True
+        )
 
     die("could not parse binders for a template; hand-edit")
     return ""
@@ -573,11 +630,11 @@ def precheck(root: Path, lean_file: Path) -> None:
     run(["bash", str(script), str(lean_file)], cwd=root, timeout=60)
 
 
-def check_lean(root: Path, lean_file: Path, posted: str, kind: str) -> None:
-    chk = "refute" if kind == "refute" else "check"
+def check_lean(root: Path, lean_file: Path, posted: str, desk_kind: str) -> None:
+    chk = "refute" if desk_kind == "refute" else "check"
     stmt_path = Path(tempfile.gettempdir()) / f"{lean_file.stem}.stmt"
     stmt_path.write_text(posted + "\n", encoding="utf-8")
-    print(f"gen_twin: check-lean {chk}", file=sys.stderr)
+    print(f"gen_twin: check-lean {chk} (desk kind {desk_kind})", file=sys.stderr)
     p = run(
         ["node", "tools/check-lean.mjs", str(lean_file), str(stmt_path), chk],
         cwd=root,
@@ -616,16 +673,37 @@ def process_one(
     do_build: bool,
     do_check: bool,
 ) -> None:
-    posted = gap_stmt(by_id, gid)
+    row = rg.fetch_desk_row(gid) or by_id.get(gid) or {}
+    desk_kind = rg.checker_kind(row)
+    find = rg.is_find_row(row)
+    posted = (row.get("statement") or "").strip() or gap_stmt(by_id, gid)
+    if '"' in posted:
+        die(f"gap {gid} statement contains a string literal; template will not emit quotes")
     lemma_path = rg.lean_path(root, lemma_id)
     if not lemma_path.is_file():
         die(f"merged lemma file missing: {lemma_path}")
     rec = rg.lemma_record(lemma_path)
     if not rec or not rec.get("type"):
         die(f"could not read last theorem of {lemma_id}")
-    kind, why = choose_template(kind_cli, posted, rec["type"])
+    print(
+        f"gen_twin: desk {gid} kind={desk_kind} find={find}",
+        file=sys.stderr,
+    )
+    kind, why = choose_template(kind_cli, posted, rec["type"], desk_kind=desk_kind)
+    if kind == "refute" and desk_kind != "refute":
+        die(
+            f"desk posts {gid} as kind {desk_kind} (find={find}); "
+            "will not emit ¬ of a check/find row"
+        )
+    wrap = desk_kind == "refute"
     print(f"gen_twin: {gid} via {lemma_id} kind={kind} ({why})", file=sys.stderr)
-    text = emit_file(kind, gid, lemma_id, posted, rec["type"])
+    text = emit_file(kind, gid, lemma_id, posted, rec["type"], wrap=wrap)
+    if rg.theorem_wraps_posted(
+        rg.last_theorem_type_of_text(text) or "", posted
+    ) and desk_kind != "refute":
+        die(
+            f"template wrapped ¬ around posted statement of check/find row {gid}"
+        )
     if dry_run:
         sys.stdout.write(text)
         return
@@ -637,7 +715,7 @@ def process_one(
         precheck(root, path)
     if do_push:
         if do_check:
-            check_lean(root, path, posted, kind)
+            check_lean(root, path, posted, desk_kind)
         commit_and_push(root, gid, lemma_id, kind, path)
 
 
@@ -645,7 +723,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("gap", nargs="?", help="open gap id, e.g. L-meta-25652")
     ap.add_argument("lemma", nargs="?", help="merged lemma id, e.g. L-meta-25645")
-    ap.add_argument("--kind", choices=("auto", "refute", "witness"), default="auto")
+    ap.add_argument("--kind", choices=("auto", "refute", "witness", "check"), default="auto")
     ap.add_argument("--push", action="store_true", help="branch, commit, precheck, push")
     ap.add_argument("--dry-run", action="store_true", help="print Lean to stdout")
     ap.add_argument("--no-build", action="store_true")
@@ -667,13 +745,25 @@ def main() -> int:
         head = rg.ensure_upstream(root, fetch=True)
         twins = rg.find_twins(root, status, by_id, last, head, kinds=None)
         for t in twins:
-            if not str(t.get("why") or "").startswith("rev-ineq"):
+            if not t.get("pushable"):
+                print(
+                    f"gen_twin: skip {t['id']} ({t.get('why')}); "
+                    "would negate a check/find row",
+                    file=sys.stderr,
+                )
+                continue
+            if t.get("kind") == "refute" and t.get("desk_kind") != "refute":
+                print(
+                    f"gen_twin: skip {t['id']}: desk kind is "
+                    f"{t.get('desk_kind')}, not refute",
+                    file=sys.stderr,
+                )
                 continue
             jobs.append((t["id"], t["lemma"], t["kind"]))
             if len(jobs) >= args.limit:
                 break
         if not jobs:
-            print("gen_twin: no twins from rank", file=sys.stderr)
+            print("gen_twin: no pushable twins from rank", file=sys.stderr)
             return 0
     else:
         if not args.gap or not args.lemma:
@@ -700,7 +790,7 @@ def main() -> int:
             root,
             gid,
             lemma_id,
-            k if k in ("auto", "refute", "witness") else "auto",
+            k if k in ("auto", "refute", "witness", "check") else "auto",
             by_id,
             dry_run=args.dry_run,
             do_push=args.push,

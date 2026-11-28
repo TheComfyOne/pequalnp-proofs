@@ -60,6 +60,101 @@ if hits:
 print("precheck: no inductive/sorry/axiom/native_decide in %s" % path, file=sys.stderr)
 PY
 
+# Desk kind: intake takes kind from GET /desk/row?gap=ID (find:true / missing
+# kind => check). A check/find file must prove the posted statement, not ¬ S.
+python3 - "${ROOT}" "${REL}" <<'PY'
+import json, os, re, sys, urllib.request
+from pathlib import Path
+
+root, rel = sys.argv[1:]
+rel = rel.replace("\\", "/")
+stem = Path(rel).stem
+if not stem.startswith("L_"):
+    sys.exit(0)
+gid = "L-" + stem[2:].replace("_", "-")
+row_url = os.environ.get(
+    "ROW_URL", "https://pequalnp-desk.pequalnp.workers.dev/desk/row?gap="
+)
+path = Path(root) / rel
+if not path.is_file():
+    path = Path(rel)
+text = path.read_text(encoding="utf-8")
+
+def last_thm_type(s: str):
+    idx = s.rfind("theorem PEqualNP.Outside.")
+    if idx < 0:
+        return None
+    rest = s[idx:]
+    m = re.search(r"\s:=\s*by\b|\s:=", rest)
+    if not m:
+        return None
+    head = rest[: m.start()]
+    colon = head.find(":")
+    if colon < 0:
+        return None
+    return head[colon + 1 :].strip()
+
+thm = last_thm_type(text) or ""
+thm_neg = thm.lstrip().startswith("¬") or thm.lstrip().startswith("(¬")
+
+try:
+    req = urllib.request.Request(row_url + gid, headers={"User-Agent": "precheck/1"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        blob = json.load(r)
+except Exception as e:
+    if thm_neg:
+        print("precheck: cannot fetch desk row for %s (%s); refusing ¬ theorem" % (gid, e), file=sys.stderr)
+        sys.exit(1)
+    print("precheck: desk row fetch failed for %s; theorem is not a negation, continuing" % gid, file=sys.stderr)
+    sys.exit(0)
+
+row = None
+for g in blob.get("gaps") or []:
+    if g.get("id") == gid:
+        row = g
+        break
+if not row:
+    if thm_neg:
+        print("precheck: desk has no open row for %s; refusing ¬ theorem" % gid, file=sys.stderr)
+        sys.exit(1)
+    print("precheck: desk has no open row for %s; theorem is not a negation, continuing" % gid, file=sys.stderr)
+    sys.exit(0)
+
+k = row.get("kind")
+desk_kind = "refute" if k == "refute" else "check"
+find = row.get("find") is True
+posted = (row.get("statement") or "").strip()
+posted_neg = posted.lstrip().startswith("¬") or posted.lstrip().startswith("(¬")
+print("precheck: desk %s kind=%s find=%s" % (gid, desk_kind, find), file=sys.stderr)
+
+if desk_kind != "refute":
+    if thm_neg and not posted_neg:
+        print(
+            "precheck: desk posts %s as kind %s (find=%s); the file must prove the posted statement, not its negation"
+            % (gid, desk_kind, find),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    pn = re.sub(r"\s+", "", posted)
+    tn = re.sub(r"\s+", "", thm)
+    if pn and (tn.startswith("¬(" + pn) or tn.startswith("(¬(" + pn)):
+        print(
+            "precheck: theorem wraps ¬ around the posted statement of check/find row %s"
+            % gid,
+            file=sys.stderr,
+        )
+        sys.exit(1)
+else:
+    if not thm_neg:
+        print(
+            "precheck: desk posts %s as kind refute; the theorem must be ¬ of the posted statement"
+            % gid,
+            file=sys.stderr,
+        )
+        sys.exit(1)
+print("precheck: desk kind %s matches theorem" % desk_kind, file=sys.stderr)
+PY
+
 python3 - "${ROOT}" "${UPSTREAM_REF}" "${REL}" <<'PY'
 import os, subprocess, sys
 root, upstream, rel = sys.argv[1:]

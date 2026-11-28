@@ -8,52 +8,58 @@ proof branch). Proof branches are still cut from `upstream/main` as
 Push only via `.cursor/tools/new_steps.sh --push FILE`. Print
 `PUSHED <gap id> (difficulty N/10)`. Do not open PRs from this agent.
 
-## refute-by-merged-lower-bound
+## desk kind is the checker kind (do not negate find/check rows)
 
-**Trick.** If an open row asks for a circuit (or selector, or Res length)
-strictly smaller than a bound already proved by a merged lemma, **refute**
-the posted existence by applying that lemma. Do not search for a circuit.
+**Rule.** Intake / authoritative CI fetch
+`https://pequalnp-desk.pequalnp.workers.dev/desk/row?gap=ID` and pass that
+row to `outside-guard.mjs`. Kind is `g.kind`: missing or `check` → checker
+kind **check**; only `g.kind === 'refute'` → checker kind **refute**. A desk
+row with `find: true` has **no** `kind: refute` field, so CI judges it as
+**check**. The file must prove the posted statement exactly. Local
+`check-lean.mjs FILE STMT refute` saying ACCEPTED only means we passed
+`refute` ourselves; CI does not take that argument from us.
 
-**Examples.**
+`gen_twin.py` and `precheck.sh` must GET that row and use **its** kind.
+`check-lean` is called with the desk kind. Refute-by-lower-bound (theorem
+`¬ posted`) is emitted **only** when the desk posts the step as a
+refutation. Otherwise only prove-by-witness / symmetry / special-case
+templates that prove the posted statement. A check/find file whose theorem
+is `¬ (posted)` is refused locally.
 
-- `L-meta-25584` (3/10): eight-gate monotone 5-row selector. Merged
-  `L-meta-25534` gives `2 * n - 1 ≤ C.size` (here 9) on the same one-hot
-  promise, so `size ≤ 8` is false. Encode pairs as `Fin 25`, apply, `omega`
-  / `decide` the numeric clash. Checker kind `refute`.
-- `L-meta-25609` (2/10): “find a FanInTwo circuit below the sparse
-  C4-free bound.” Merged `L-meta-25593` is exactly the opposite inequality
-  `(48d+2)(n+m) ≤ (48d+1) C.size + 150d + 5`. `rintro` the exists, apply
-  25593, `not_le_of_gt`. Same hyps (degree window, no 4-cycle, FanInTwo,
-  Represents). Checker kind `refute`.
-- Sibling template: `L-meta-25693` already on main (n=4, size ≤ 6 vs 25534’s 7).
+**Failed pattern (do not repeat).**
 
-**How to spot.**
+- `L-meta-25584` (3/10) PR #48313: REJECTED (statement). Desk `find: true`,
+  statement is `∃ C` size ≤ 8 selector. File proved `¬` of that. Merged
+  `L-meta-25534` really does show size ≤ 8 is false, but that is not a
+  submit path for a find/check row.
+- `L-meta-25609` (2/10) and `L-meta-25652` (2/10): same mistake (find rows,
+  reverse of 25593 / 25645). Do not push more of these.
 
-1. Open existence rows whose `imports` name an Outside lemma
-   (`L_meta_25534`, `L_meta_25593`, …).
-2. Merged theorems of the shape `hyps → k ≤ C.size` / `RepSizeAtMost A s → k ≤ s`
-   / a linear inequality on `C.size`. Then desk rows that claim `C.size ≤ k-1`
-   or the strict opposite inequality under the same hyps.
-3. Concrete lower bounds in the tree: 25534 (`2n-1` selectors), 25529
-   (`2n` on `RepSizeAtMost` with a triple), 25593 (sparse C4-free FanInTwo),
-   18006 (5×5 crown ≥ 15), 7626 (crown `3n-3`), 29939 (crown n≥7 `3n+1`),
-   25408 (`2n-1` 2-color), 9442 (Fano AO2 ≥ 27), 118 (`¬` PHP 4 3 LinRefutation
-   length ≤ 47). Match open `∃` claims strictly below those numbers.
-4. Titles like “find an N-gate …” / “below the … bound” where N is one less
-   than a lemma already on `upstream/main`.
+**What the repo actually allows when a find statement is false** (do not
+use without telling the owner): see the note at the end of this file.
+This hunt does not hold leases, so skip those rows and move on.
 
-If the posted statement is already `¬ (∃ …)` and that `¬` is exactly the
-lemma, prove it as `check`, not `refute`.
+**How to spot a real refute twin.** Desk row `kind` is the string
+`refute`, or the posted statement is already the negated twin the desk
+listed (prove that text as **check**, do not wrap another `¬`). Titles
+like “Find a … below the bound” with `find: true` are **check**, not
+refute.
 
 ## twin-pair sweep (templated)
 
 **Trick.** Every loop, diff `upstream/main` since the last SHA and match
-each newly merged lemma (ours or anyone’s) against open desk rows on the
-same function/promise. A too-small bound is a **refute** via the
-lower-bound lemma; a bound at or above a merged construction is a
-**prove** via that witness. These are 2–3/10 and minutes each — rank
-them first, then emit/build/push from a fixed template. Hand-edit only
-if the one lake build fails.
+each newly merged lemma against open desk rows on the same
+function/promise.
+
+- Bound **at or above** a merged construction → **prove** the posted
+  statement via that witness (also symmetry / special-case that prove S).
+- Bound **below** a merged lower bound → **only** if the desk posts the
+  step as a refutation (or the posted text is already `¬ S`). Otherwise
+  count it as `skip-find-refute` and do not emit.
+
+These are 2–3/10 when they are pushable. Rank pushable twins first, then
+emit/build/push from a fixed template. Hand-edit only if the one lake
+build fails.
 
 **Tooling.**
 
@@ -63,26 +69,31 @@ if the one lake build fails.
 .cursor/tools/gen_twin.py --from-rank --push
 ```
 
-`gen_twin.py` writes `lean/PEqualNP/Outside/L_<gap>.lean` from one of two
-templates (refute-by-lower-bound or prove-by-witness), runs one
-`lake build` + `precheck` (+ `check-lean`), and pushes. Do not open a PR.
+`gen_twin.py` writes `lean/PEqualNP/Outside/L_<gap>.lean`, GETs the desk
+row, runs one `lake build` + `precheck` (+ `check-lean` with **desk**
+kind), and pushes. Do not open a PR. `--from-rank` skips `skip-find-refute`.
 
-**Examples.**
+**Examples (valid).**
 
-- `L-meta-25609` (2/10) via `L-meta-25593` — reverse inequality, refute template.
-- `L-meta-25652` (2/10) via `L-meta-25645` — same template, NOT-charging bound.
-- `L-meta-25584` (3/10) via `L-meta-25534` — instantiate `n=5` (template may
-  fail; hand-edit the Fin-25 encoding).
-- `L-meta-25693` already on main — instantiate `n=4` vs 25534’s `2n-1`.
+- Prove-by-witness / weaken size when a merged `∃` construction is ≤ the
+  posted bound (same function). Checker kind `check`.
+- Symmetry: posted `HasCircuitSize n f' k` where `f'` is `f` up to input
+  permutation / graph relabeling and a merged witness has size ≤ k.
+- Special-case: posted is a Fin-n instance of a merged general lemma, and
+  the posted text is what we prove (instantiate, do not negate).
+- Sibling `L-meta-25693` on main is a **desk-posted** refutation
+  instantiate vs 25534, not a find row.
 
 **How to spot.**
 
 1. Run the twin sweep at the start of every loop (rank_gaps does this
-   unless `--no-twins`). State is `.pnp/twin-last-sha`.
-2. Open existence whose last comparison is the reverse of a merged
-   theorem (`A ≤ B` vs `B < A`) under the same hyps.
-3. Open rows whose `imports` name a just-merged Outside lemma.
-4. Titles “Find a … below/beating the bound”. Skip generator families.
+   unless `--no-twins`). State is `.pnp/twin-last-sha`. Read the
+   sweep-count table (rev-ineq vs skip-find-refute vs witness / symmetry /
+   special).
+2. Open rows whose last comparison is the reverse of a merged theorem
+   **and** the desk kind is refute (or posted is already `¬`).
+3. Open rows whose `imports` name a just-merged **witness** lemma.
+4. Skip generator families. Skip find/check existence below a lower bound.
 
 ## push-anyway vs a rival PR under 15 min old
 
@@ -108,8 +119,7 @@ last full build failed on **one small local error**, take up to **5 extra
 minutes**. At 20 min, hard drop.
 
 **Example.** Used on the 1142 Horn/RIP gadget (dropped: scratch never
-elaborated, so no +5). Contrast 25584/25609: lemma apply, one scratch
-compile, one build, push well under 15 min.
+elaborated, so no +5). Do not spend the cap on find-refute dead-ends.
 
 **How to spot.** If the first 5 minutes do not produce a clear lemma, SAT
 witness, or `decide` circuit, skip. Do not rebuild Mathlib-scale modules
@@ -131,6 +141,7 @@ misses them.
 | 7-cycle 10-gate | “7-cycle edges” | farm |
 | two-lit H-on-6 | “two-lit function of the graph H on 6 points with mask …” | family |
 | L-pcx-189 | Res(2) PHP 4/3 upper bound | tight 7/10, drop |
+| find below a merged lb | `find: true` existence strictly smaller than a merged lower bound | not a PR; skip |
 
 Also skip: NestedCover / ReadsBack research, TM2, Gaussian/Poisson, Walsh/CRT
 reconstruction libs, PHP **lower** bounds (`no refutation has at most …`),
@@ -154,3 +165,30 @@ and conjectures.
   remove the empty lock dir and rerun.
 - No leases / no `/desk/next`. No tokens in logs. One Lean file per proof
   branch.
+
+## sanctioned path for a false find/check row (do not use without telling)
+
+Checked `.github/scripts/outside-guard.mjs`,
+`.github/workflows/authoritative.yml`, `CONTRIBUTING.md`, `README.md`,
+`tools/pnp.sh`, and join.txt.
+
+There is **no** PR/checker path that submits `¬ S` for a find/check row.
+`checkGap` maps missing/`check` kind to checker `check`, and a run of
+kind `refute` on that row is refused (`as kind check`). Intake leaves
+`KIND` empty; the workflow uses `${KIND:-check}`. `find: true` is not
+read as refute. Reductions (`R_<gap>_<n>.lean`) are only judged when
+`reductions: true` **and** the step is posted to be proved (kind check),
+and the theorem’s conclusion is still S, not `¬ S`. `dead: []` on the
+row is prior failed-attempt context, not a submit path.
+
+join.txt: prove exactly the posted statement; **refute** kind means prove
+the negated twin listed beside the unit (a separate desk-posted
+refutation). Search empty range → `pnp.sh release exhausted`.
+
+The only documented agent-facing way to say “this find statement is
+false” is **not a proof PR**: if you hold a lease, `tools/pnp.sh release
+<unit> statement_seems_false` (or `hypothesis_too_weak`). CONTRIBUTING.md
+§5 and README say the same: do not change the statement; release it.
+This hunt does not take leases, so that path is unused here. Do not
+release, do not open a refute PR against a check row, and do not invent
+a dead/refuted file kind.

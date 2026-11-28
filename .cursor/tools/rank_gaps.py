@@ -3,12 +3,19 @@
 
 Fetches desk status + gaps.json, diffs upstream/main since the last loop
 for newly merged Outside lemmas, and matches open desk rows those lemmas
-settle directly:
+settle directly. Intake kind comes from the desk row (GET /desk/row?gap=ID,
+and the `find`/`kind` fields on gaps.json):
 
-  too-small bound  -> refute via the lower-bound lemma
-  bound >= witness -> prove via that construction
+  find:true / missing kind -> checker kind check: prove the posted statement
+  kind: refute             -> checker kind refute: prove ¬ posted
+  bound >= a merged witness / symmetry / special-case that prove posted
+  too-small bound          -> ONLY if the desk posts the step as a refutation
+                              (or the posted statement is already ¬ S)
 
-Those twins print first (diff 2–3). Then the usual cheap-row ranking.
+Never emit ¬ of a find/check existence row. Those are skipped as
+skip-find-refute (L-meta-25584 / 25609 / 25652 were this mistake).
+
+Pushable twins print first (diff 2–3). Then the usual cheap-row ranking.
 
 Usage:
   .cursor/tools/rank_gaps.py
@@ -20,6 +27,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import os
 import re
@@ -31,6 +39,9 @@ from pathlib import Path
 STATUS_URL = os.environ.get("STATUS_URL", "https://pequalnp.com/desk/status")
 GAPS_URL = os.environ.get(
     "GAPS_URL", "https://data.pequalnp.com/data/desk/gaps.json"
+)
+ROW_URL = os.environ.get(
+    "ROW_URL", "https://pequalnp-desk.pequalnp.workers.dev/desk/row?gap="
 )
 REPO = os.environ.get("REPO", "open-goat/pequalnp-proofs")
 
@@ -63,6 +74,122 @@ def fetch_json(url: str):
     req = urllib.request.Request(url, headers={"User-Agent": "rank-gaps/1"})
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.load(r)
+
+
+def fetch_desk_row(gid: str) -> dict | None:
+    """One gap as the intake reads it (GET /desk/row?gap=ID)."""
+    try:
+        blob = fetch_json(ROW_URL + gid)
+    except Exception:
+        return None
+    for g in blob.get("gaps") or []:
+        if g.get("id") == gid:
+            return g
+    return None
+
+
+def checker_kind(g: dict | None) -> str:
+    """Match outside-guard.mjs + intake: find:true and missing kind are check."""
+    if not g:
+        return "check"
+    k = g.get("kind")
+    if k == "refute":
+        return "refute"
+    if k == "reduce":
+        return "reduce"
+    if k == "value":
+        return "check"
+    return "check"
+
+
+def is_find_row(g: dict | None) -> bool:
+    return bool(g and g.get("find") is True)
+
+
+def posted_is_negation(stmt: str) -> bool:
+    s = (stmt or "").lstrip()
+    return s.startswith("¬") or s.startswith("(¬")
+
+
+def file_to_gap(rel: str) -> str | None:
+    """lean/PEqualNP/Outside/L_meta_25584.lean -> L-meta-25584."""
+    stem = Path(rel).stem
+    if not stem.startswith("L_"):
+        return None
+    return "L-" + stem[2:].replace("_", "-")
+
+
+def last_theorem_type_of_text(text: str) -> str | None:
+    """Type of the last `theorem PEqualNP.Outside.` in a Lean file."""
+    return last_theorem_type(text)
+
+
+def theorem_wraps_posted(thm_type: str, posted: str) -> bool:
+    """True when the theorem is ¬ posted (extra wrapper), not posted itself."""
+    if not thm_type or not posted:
+        return False
+    if posted_is_negation(posted):
+        return False
+    t = thm_type.lstrip()
+    if not (t.startswith("¬") or t.startswith("(¬")):
+        return False
+    tn = re.sub(r"\s+", "", t)
+    pn = re.sub(r"\s+", "", posted)
+    return pn in tn
+
+
+HCS_RE = re.compile(
+    r"HasCircuitSize\s+(\d+)\s+\(\s*(fun\b[\s\S]*?)\)\s+(\d+)"
+)
+EDGE_AND_RE = re.compile(r"\(x\s+(\d+)\s*&&\s*x\s+(\d+)\)")
+CROWN_RE = re.compile(
+    r"fun\s+(\w+)\s+(\w+)\s*:\s*Fin\s+(\d+)\s*=>\s*decide\s*\(\s*\1\s*≠\s*\2\s*\)"
+)
+
+
+def parse_hcs(stmt: str) -> tuple[int, str, int] | None:
+    m = HCS_RE.search(stmt or "")
+    if not m:
+        return None
+    return int(m.group(1)), m.group(2).strip(), int(m.group(3))
+
+
+def graph_edges(expr: str) -> frozenset[tuple[int, int]] | None:
+    pairs = [tuple(sorted((int(a), int(b)))) for a, b in EDGE_AND_RE.findall(expr or "")]
+    if not pairs:
+        return None
+    return frozenset(pairs)
+
+
+def graph_canon(n: int, edges: frozenset[tuple[int, int]]) -> tuple | None:
+    if n < 2 or n > 6:
+        return None
+    best = None
+    verts = list(range(n))
+    for p in itertools.permutations(verts):
+        mapped = tuple(sorted(tuple(sorted((p[a], p[b]))) for a, b in edges))
+        if best is None or mapped < best:
+            best = mapped
+    return best
+
+
+LAST_TWIN_COUNTS: dict = {}
+
+
+def twin_action(row: dict, rec: dict, sweep: str = "") -> tuple[str | None, str]:
+    """What gen_twin may emit. None = would negate a check/find row; skip."""
+    rec_k = rec.get("kind") or "other"
+    desk = row.get("desk_kind") or "check"
+    if rec_k == "witness":
+        return "witness", "witness"
+    if desk == "refute":
+        return "refute", "refute"
+    if row.get("posted_neg") and desk == "check":
+        return "check", "posted-neg"
+    # Symmetry / special-case / explicit witness sweeps prove posted S.
+    if sweep in ("symmetry", "special", "witness") and desk != "refute":
+        return "check", sweep
+    return None, "skip-find-refute"
 
 
 def num(gid: str) -> int:
@@ -519,6 +646,12 @@ def find_twins(
                 "stmt": stmt,
                 "imports": g.get("imports") or [],
                 "ineq": last_inequality(stmt),
+                "find": is_find_row(g),
+                "desk_kind": checker_kind(g),
+                "posted_neg": posted_is_negation(stmt),
+                "hcs": parse_hcs(stmt),
+                "crown_n": (lambda m: int(m.group(3)) if m else None)(CROWN_RE.search(stmt)),
+                "g": g,
             }
         )
 
@@ -552,24 +685,64 @@ def find_twins(
 
     hits: list[dict] = []
     seen: set[tuple[str, str]] = set()
+    caught: dict[str, dict[str, set[str]]] = {
+        name: {"meta": set(), "pcx": set(), "clb": set()}
+        for name in (
+            "rev-ineq",
+            "rev-ineq-push",
+            "skip-find-refute",
+            "imports",
+            "witness",
+            "symmetry",
+            "special",
+        )
+    }
 
-    def add(gap_id: str, lemma_id: str, kind: str, why: str, title: str, new: bool) -> None:
+    def catch(kind_name: str, gap_id: str) -> None:
+        ln = lane(gap_id)
+        if ln in caught[kind_name]:
+            caught[kind_name][ln].add(gap_id)
+
+    def add(
+        row: dict,
+        lemma_id: str,
+        rec: dict,
+        sweep: str,
+        new: bool,
+    ) -> None:
+        gap_id = row["id"]
         key = (gap_id, lemma_id)
         if key in seen:
             return
         seen.add(key)
+        catch(sweep if sweep in caught else "rev-ineq", gap_id)
+        action, tag = twin_action(row, rec, sweep)
+        if sweep == "rev-ineq" or sweep == "imports":
+            if action is None:
+                catch("skip-find-refute", gap_id)
+            elif sweep == "rev-ineq":
+                catch("rev-ineq-push", gap_id)
+        if action is None:
+            why = f"{sweep}:{tag}"
+            knd = "skip"
+        else:
+            why = f"{sweep}:{tag}"
+            knd = action
         hits.append(
             {
                 "id": gap_id,
                 "lemma": lemma_id,
-                "kind": kind,
+                "kind": knd,
                 "why": why + (":new" if new else ""),
                 "diff": 2 if new else 3,
-                "title": title,
+                "title": row["title"],
                 "lane": lane(gap_id),
                 "held": 0,
                 "pr": 0,
                 "n": num(gap_id),
+                "pushable": action is not None,
+                "desk_kind": row.get("desk_kind") or "check",
+                "find": bool(row.get("find")),
             }
         )
 
@@ -580,24 +753,17 @@ def find_twins(
             key = (norm_expr(ineq[0]), norm_expr(ineq[2]))
             for row in rev_index.get(key, []):
                 if row["ineq"] and reverse_ops(ineq[1], row["ineq"][1]):
-                    knd = "refute" if rec["kind"] != "witness" else "witness"
-                    # Existence of the reverse of a ≤-lemma is a refute.
-                    if rec["kind"] == "lower" and row["ineq"][1] in ("<", ">"):
-                        knd = "refute"
-                    elif rec["kind"] == "witness":
-                        knd = "witness"
-                    add(row["id"], lid, knd, "rev-ineq", row["title"], is_new)
+                    add(row, lid, rec, "rev-ineq", is_new)
         for row in open_rows:
             imps = import_lemma_ids(row["imports"])
             # A library dump of 80 imported lemmas is not a twin. Direct
             # twins name one or two Outside lemmas.
             if len(imps) > 2 or lid not in imps:
                 continue
-            knd = "refute" if rec["kind"] == "lower" else "witness"
-            add(row["id"], lid, knd, "imports", row["title"], is_new)
+            add(row, lid, rec, "imports", is_new)
 
-    # Full reverse-ineq pass over Outside for still-open Find/beating rows
-    # whose lemma may have merged before this loop's window.
+    # Full reverse-ineq pass over Outside for still-open rows whose lemma
+    # may have merged before this loop's window.
     find_rows = [r for r in open_rows if r["ineq"]]
     if find_rows:
         need = {(norm_expr(r["ineq"][2]), norm_expr(r["ineq"][0])): r for r in find_rows if r["ineq"]}
@@ -614,9 +780,101 @@ def find_twins(
                 key = (norm_expr(ineq[0]), norm_expr(ineq[2]))
                 row = need.get(key)
                 if row and reverse_ops(ineq[1], row["ineq"][1]):
-                    add(row["id"], rec["gap"], "refute", "rev-ineq-scan", row["title"], False)
+                    add(row, rec["gap"], rec, "rev-ineq", False)
 
-    hits.sort(key=lambda h: (h["diff"], -h["n"]))
+    # Witness / symmetry / special-case: prove the posted statement.
+    # Only new/imported lemmas plus a short known list — do not glob 18k files.
+    hcs_lemmas: list[tuple[str, dict, tuple[int, str, int]]] = []
+    crown_lemmas: list[tuple[str, dict, int, str]] = []
+    extra_recs: dict[str, dict] = dict(lemmas)
+    for lid in (
+        "L-meta-7626",
+        "L-meta-18006",
+        "L-meta-29939",
+        "L-meta-25534",
+        "L-meta-25408",
+        "L-meta-25529",
+        "L-meta-9921",
+        "L-pcx-123",
+    ):
+        if lid in extra_recs:
+            continue
+        p = lean_path(root, lid)
+        if p.is_file():
+            rec = lemma_record(p)
+            if rec:
+                extra_recs[lid] = rec
+    for gid, rec in extra_recs.items():
+        typ = rec.get("type") or ""
+        hcs = parse_hcs(typ)
+        if hcs:
+            hcs_lemmas.append((gid, rec, hcs))
+        cm = CROWN_RE.search(typ)
+        if cm and rec.get("kind") == "witness":
+            crown_lemmas.append((gid, rec, int(cm.group(3)), typ))
+
+    hcs_exact: dict[tuple[int, str], list[tuple[str, dict, int]]] = {}
+    hcs_graph: dict[tuple[int, tuple], list[tuple[str, dict, int]]] = {}
+    for lid, rec, (n, expr, k) in hcs_lemmas:
+        if rec.get("kind") != "witness":
+            continue
+        hcs_exact.setdefault((n, norm_expr(expr)), []).append((lid, rec, k))
+        edges = graph_edges(expr)
+        if edges:
+            canon = graph_canon(n, edges)
+            if canon is not None:
+                hcs_graph.setdefault((n, canon), []).append((lid, rec, k))
+
+    for row in open_rows:
+        hcs = row.get("hcs")
+        if hcs:
+            n, expr, k_post = hcs
+            for lid, rec, k_lem in hcs_exact.get((n, norm_expr(expr)), []):
+                if k_post >= k_lem:
+                    add(row, lid, rec, "witness", rec["module"] in new_mods)
+            edges = graph_edges(expr)
+            if edges:
+                canon = graph_canon(n, edges)
+                if canon is not None:
+                    for lid, rec, k_lem in hcs_graph.get((n, canon), []):
+                        if k_post >= k_lem and norm_expr(expr) != norm_expr(
+                            parse_hcs(rec.get("type") or "")[1]
+                            if parse_hcs(rec.get("type") or "")
+                            else ""
+                        ):
+                            add(row, lid, rec, "symmetry", rec["module"] in new_mods)
+        # Special-case: posted is a Fin-n crown instance of a general witness,
+        # or a forall lower bound instantiating a merged ∀ lemma (prove posted).
+        cn = row.get("crown_n")
+        if cn is not None:
+            for lid, rec, n_lem, typ in crown_lemmas:
+                if n_lem == cn and rec.get("kind") == "witness":
+                    add(row, lid, rec, "special", rec["module"] in new_mods)
+            stmt = row["stmt"]
+            if stmt.lstrip().startswith("∀") and not row.get("find"):
+                for lid in (
+                    "L-meta-7626",
+                    "L-meta-18006",
+                    "L-meta-29939",
+                    "L-meta-25534",
+                    "L-meta-25408",
+                    "L-meta-25529",
+                ):
+                    rec = extra_recs.get(lid)
+                    if rec and rec.get("kind") == "lower":
+                        add(row, lid, rec, "special", rec["module"] in new_mods)
+
+    global LAST_TWIN_COUNTS
+    LAST_TWIN_COUNTS = {
+        name: {ln: len(ids) for ln, ids in lanes.items()}
+        for name, lanes in caught.items()
+    }
+    LAST_TWIN_COUNTS["_open"] = {
+        ln: sum(1 for r in open_rows if lane(r["id"]) == ln)
+        for ln in ("meta", "pcx", "clb")
+    }
+
+    hits.sort(key=lambda h: (0 if h.get("pushable") else 1, h["diff"], -h["n"]))
     return hits
 
 
@@ -664,17 +922,34 @@ def main() -> int:
         sys.stdout.write("\n")
         return 0
 
-    if twins:
+    if twins or LAST_TWIN_COUNTS:
+        open_n = LAST_TWIN_COUNTS.get("_open") or {}
         print(
             f"# twins {len(twins)} (upstream={head[:12] if head else '?'} "
-            f"since={last_sha[:12] if last_sha else 'first'})",
+            f"since={last_sha[:12] if last_sha else 'first'}) "
+            f"open meta={open_n.get('meta', 0)} pcx={open_n.get('pcx', 0)} "
+            f"clb={open_n.get('clb', 0)}",
             file=sys.stderr,
         )
-        print("# twin\tgap\tlemma\tkind\tdiff\twhy\ttitle")
+        print("# sweep\tmeta\tpcx\tclb\ttotal")
+        for name in (
+            "rev-ineq",
+            "rev-ineq-push",
+            "skip-find-refute",
+            "imports",
+            "witness",
+            "symmetry",
+            "special",
+        ):
+            d = LAST_TWIN_COUNTS.get(name) or {}
+            m, p, c = d.get("meta", 0), d.get("pcx", 0), d.get("clb", 0)
+            print(f"{name}\t{m}\t{p}\t{c}\t{m + p + c}")
+        print("# twin\tgap\tlemma\tkind\tdiff\tpush\twhy\ttitle")
         for t in twins:
+            flag = "yes" if t.get("pushable") else "SKIP"
             print(
                 f"twin\t{t['id']}\t{t['lemma']}\t{t['kind']}\t{t['diff']}\t"
-                f"{t['why']}\t{(t['title'] or '')[:90]}"
+                f"{flag}\t{t['why']}\t{(t['title'] or '')[:90]}"
             )
         if args.twins_only:
             return 0
