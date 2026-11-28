@@ -9,7 +9,14 @@ desk row (GET /desk/row?gap=ID), not a flag we pick:
 
 Never wrap ¬ around a find/check existence row. Intake judges those as
 check (find: true => check). L-meta-25584 was REJECTED (statement) for
-that. Hand-edit only if the one lake build fails.
+that.
+
+Imports: only Mathlib (and Mathlib.*) plus the desk row's `imports`
+whitelist. A twin may reuse a merged lemma only if that lemma's module is
+listed. L-meta-25652 PR 48521 was REFUSED for importing
+PEqualNP.Outside.L_meta_25645 when the row listed only PEqualNP.Defs.
+
+Hand-edit only if the one lake build fails.
 
 Usage:
   .cursor/tools/gen_twin.py L-meta-25652 L-meta-25645
@@ -304,6 +311,32 @@ def rintro_names(binders: list[str], n_hyps: int) -> str:
     return f"⟨{inner}⟩"
 
 
+def import_header(listed: list[str]) -> str:
+    """Mathlib, then the desk row's listed modules in order. Nothing else."""
+    lines = ["import Mathlib"]
+    seen = {"Mathlib"}
+    for m in listed or []:
+        if not m or m in seen:
+            continue
+        if m.startswith("Mathlib."):
+            lines.append(f"import {m}")
+            seen.add(m)
+            continue
+        lines.append(f"import {m}")
+        seen.add(m)
+    return "\n".join(lines) + "\n\n"
+
+
+def require_listed_lemma(gid: str, lemma_id: str, listed: list[str]) -> str:
+    mod = rg.lemma_module_name(lemma_id)
+    if mod not in set(listed or []):
+        die(
+            f"desk row {gid} does not list {mod}; "
+            "CI only allows Mathlib and the modules the gap lists"
+        )
+    return mod
+
+
 def emit_refute_reverse(
     gap_mod: str,
     lemma_mod: str,
@@ -311,6 +344,7 @@ def emit_refute_reverse(
     binders: list[str],
     n_hyps: int,
     wrap: bool = True,
+    header: str = "",
 ) -> str:
     # binders + (n_hyps conjuncts including last ineq)
     names = binders + [f"h{i}" for i in range(n_hyps - 1)] + (["hlt"] if n_hyps else [])
@@ -318,11 +352,8 @@ def emit_refute_reverse(
     rintro = ", ".join(names)
     thm = f"(¬ ({posted}))" if wrap else f"({posted})"
     return (
-        "import Mathlib\n"
-        "import PEqualNP.Defs\n"
-        f"import PEqualNP.Outside.{lemma_mod}\n"
-        "\n"
-        f"theorem PEqualNP.Outside.{gap_mod} :\n"
+        header
+        + f"theorem PEqualNP.Outside.{gap_mod} :\n"
         f"    {thm} := by\n"
         f"  rintro ⟨{rintro}⟩\n"
         f"  have hge := PEqualNP.Outside.{lemma_mod} {apply_args}\n"
@@ -342,6 +373,7 @@ def emit_refute_instantiate(
     dims: list[int],
     k: int,
     wrap: bool = True,
+    header: str = "",
 ) -> str:
     # Map extra Nat binders to Fin dimensions in order.
     nat_binders = []
@@ -399,11 +431,8 @@ def emit_refute_instantiate(
         size_name = "hlt"
     thm = f"(¬ ({posted}))" if wrap else f"({posted})"
     return (
-        "import Mathlib\n"
-        "import PEqualNP.Defs\n"
-        f"import PEqualNP.Outside.{lemma_mod}\n"
-        "\n"
-        f"theorem PEqualNP.Outside.{gap_mod} :\n"
+        header
+        + f"theorem PEqualNP.Outside.{gap_mod} :\n"
         f"    {thm} := by\n"
         f"  rintro ⟨{rintro}⟩\n"
         f"  have hLower : {bound_term} ≤ C.size :=\n"
@@ -412,13 +441,12 @@ def emit_refute_instantiate(
     )
 
 
-def emit_witness_apply(gap_mod: str, lemma_mod: str, posted: str) -> str:
+def emit_witness_apply(
+    gap_mod: str, lemma_mod: str, posted: str, header: str = ""
+) -> str:
     return (
-        "import Mathlib\n"
-        "import PEqualNP.Defs\n"
-        f"import PEqualNP.Outside.{lemma_mod}\n"
-        "\n"
-        f"theorem PEqualNP.Outside.{gap_mod} :\n"
+        header
+        + f"theorem PEqualNP.Outside.{gap_mod} :\n"
         f"    ({posted}) :=\n"
         f"  PEqualNP.Outside.{lemma_mod}\n"
     )
@@ -432,6 +460,7 @@ def emit_witness_weaken(
     n_hyps: int,
     k_lemma: int,
     k_post: int,
+    header: str = "",
 ) -> str:
     names = binders + [f"h{i}" for i in range(n_hyps)]
     rintro = ", ".join(names)
@@ -447,11 +476,8 @@ def emit_witness_weaken(
             fields.append(n)
     # obtain from lemma then refine with weakened size
     return (
-        "import Mathlib\n"
-        "import PEqualNP.Defs\n"
-        f"import PEqualNP.Outside.{lemma_mod}\n"
-        "\n"
-        f"theorem PEqualNP.Outside.{gap_mod} :\n"
+        header
+        + f"theorem PEqualNP.Outside.{gap_mod} :\n"
         f"    ({posted}) := by\n"
         f"  obtain ⟨{rintro}⟩ := PEqualNP.Outside.{lemma_mod}\n"
         f"  exact ⟨{', '.join(fields)}⟩\n"
@@ -503,10 +529,17 @@ def choose_template(
 
 
 def emit_file(
-    kind: str, gid: str, lemma_id: str, posted: str, lemma_typ: str, wrap: bool = True
+    kind: str,
+    gid: str,
+    lemma_id: str,
+    posted: str,
+    lemma_typ: str,
+    wrap: bool = True,
+    listed: list[str] | None = None,
 ) -> str:
     gap_mod = rg.gap_to_module(gid)
     lemma_mod = rg.gap_to_module(lemma_id)
+    header = import_header(listed or [])
     binders, hyps, last = parse_exists(posted)
     f_names, f_hyps, f_last = parse_forall(lemma_typ)
     k_post = size_le(posted)
@@ -523,13 +556,26 @@ def emit_file(
             ibinders, ihyps, _ilast = parse_exists(inner)
             if ibinders:
                 return emit_refute_reverse(
-                    gap_mod, lemma_mod, posted, ibinders, len(ihyps) + 1, wrap=False
+                    gap_mod,
+                    lemma_mod,
+                    posted,
+                    ibinders,
+                    len(ihyps) + 1,
+                    wrap=False,
+                    header=header,
                 )
         if k_lem is not None and k_post is not None and k_post > k_lem and binders:
             return emit_witness_weaken(
-                gap_mod, lemma_mod, posted, binders, len(hyps) + 1, k_lem, k_post
+                gap_mod,
+                lemma_mod,
+                posted,
+                binders,
+                len(hyps) + 1,
+                k_lem,
+                k_post,
+                header=header,
             )
-        return emit_witness_apply(gap_mod, lemma_mod, posted)
+        return emit_witness_apply(gap_mod, lemma_mod, posted, header=header)
 
     # refute: only when the desk posts the step as a refutation.
     if not wrap:
@@ -545,7 +591,13 @@ def emit_file(
         and binders == f_names
     ):
         return emit_refute_reverse(
-            gap_mod, lemma_mod, posted, binders, len(hyps) + 1, wrap=True
+            gap_mod,
+            lemma_mod,
+            posted,
+            binders,
+            len(hyps) + 1,
+            wrap=True,
+            header=header,
         )
 
     dims = fin_dims(posted)
@@ -566,11 +618,18 @@ def emit_file(
             dims,
             k_post,
             wrap=True,
+            header=header,
         )
 
     if binders:
         return emit_refute_reverse(
-            gap_mod, lemma_mod, posted, binders, max(1, len(hyps) + 1), wrap=True
+            gap_mod,
+            lemma_mod,
+            posted,
+            binders,
+            max(1, len(hyps) + 1),
+            wrap=True,
+            header=header,
         )
 
     die("could not parse binders for a template; hand-edit")
@@ -685,10 +744,12 @@ def process_one(
     rec = rg.lemma_record(lemma_path)
     if not rec or not rec.get("type"):
         die(f"could not read last theorem of {lemma_id}")
+    listed = [str(x) for x in (row.get("imports") or [])]
     print(
-        f"gen_twin: desk {gid} kind={desk_kind} find={find}",
+        f"gen_twin: desk {gid} kind={desk_kind} find={find} imports={listed}",
         file=sys.stderr,
     )
+    require_listed_lemma(gid, lemma_id, listed)
     kind, why = choose_template(kind_cli, posted, rec["type"], desk_kind=desk_kind)
     if kind == "refute" and desk_kind != "refute":
         die(
@@ -697,7 +758,15 @@ def process_one(
         )
     wrap = desk_kind == "refute"
     print(f"gen_twin: {gid} via {lemma_id} kind={kind} ({why})", file=sys.stderr)
-    text = emit_file(kind, gid, lemma_id, posted, rec["type"], wrap=wrap)
+    text = emit_file(
+        kind, gid, lemma_id, posted, rec["type"], wrap=wrap, listed=listed
+    )
+    for name in rg.parse_import_names(text):
+        if not rg.import_is_allowed(name, listed):
+            die(
+                f"template import {name} is not allowed "
+                f"(only Mathlib and {listed})"
+            )
     if rg.theorem_wraps_posted(
         rg.last_theorem_type_of_text(text) or "", posted
     ) and desk_kind != "refute":
@@ -756,6 +825,13 @@ def main() -> int:
                 print(
                     f"gen_twin: skip {t['id']}: desk kind is "
                     f"{t.get('desk_kind')}, not refute",
+                    file=sys.stderr,
+                )
+                continue
+            if t.get("listed") is False:
+                print(
+                    f"gen_twin: skip {t['id']} via {t['lemma']}: "
+                    "lemma module is not in the desk row imports",
                     file=sys.stderr,
                 )
                 continue

@@ -45,6 +45,28 @@ listed (prove that text as **check**, do not wrap another `¬`). Titles
 like “Find a … below the bound” with `find: true` are **check**, not
 refute.
 
+## desk `imports` is the CI whitelist
+
+**Rule.** `outside-guard.mjs` allows only `import Mathlib`, `import Mathlib.*`,
+and modules named in the desk row's `imports` field. A twin may reuse a
+merged lemma **only** if that lemma's module is in the list (for example
+`PEqualNP.Outside.L_meta_25534`). `gen_twin.py` emits Mathlib plus the
+listed modules, nothing else. `precheck.sh` refuses any extra import.
+`rank_gaps.py` marks unmatched lemmas `skip-not-listed` and does not
+push them.
+
+**Failed pattern (do not repeat).**
+
+- `L-meta-25652` PR #48521: REFUSED before build.
+  `import PEqualNP.Outside.L_meta_25645 is not allowed (only Mathlib and
+  the modules the gap lists)`. The row listed only `PEqualNP.Defs`.
+  Reverse-inequality against an unlisted merged file is not a twin.
+
+**How to spot.** GET `/desk/row?gap=ID` and read `imports`. If the lemma
+is not there, skip: do not import it, do not apply it. A row that lists
+the lemma (25584 listed 25534; 25609 listed 25593) may import that
+module; the desk **kind** still decides check vs refute.
+
 ## twin-pair sweep (templated)
 
 **Trick.** Every loop, diff `upstream/main` since the last SHA and match
@@ -71,7 +93,8 @@ build fails.
 
 `gen_twin.py` writes `lean/PEqualNP/Outside/L_<gap>.lean`, GETs the desk
 row, runs one `lake build` + `precheck` (+ `check-lean` with **desk**
-kind), and pushes. Do not open a PR. `--from-rank` skips `skip-find-refute`.
+kind), and pushes. Do not open a PR. `--from-rank` skips
+`skip-find-refute` and `skip-not-listed`.
 
 **Examples (valid).**
 
@@ -94,6 +117,7 @@ kind), and pushes. Do not open a PR. `--from-rank` skips `skip-find-refute`.
    **and** the desk kind is refute (or posted is already `¬`).
 3. Open rows whose `imports` name a just-merged **witness** lemma.
 4. Skip generator families. Skip find/check existence below a lower bound.
+5. Skip a lemma whose module is not in the row's `imports`.
 
 ## push-anyway vs a rival PR under 15 min old
 

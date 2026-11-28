@@ -15,6 +15,10 @@ and the `find`/`kind` fields on gaps.json):
 Never emit ¬ of a find/check existence row. Those are skipped as
 skip-find-refute (L-meta-25584 / 25609 / 25652 were this mistake).
 
+A twin may reuse a merged lemma only if that lemma's module is in the
+desk row's `imports` list (CI whitelist: Mathlib + listed). Unlisted
+lemmas are skip-not-listed (L-meta-25652 PR 48521 imported 25645).
+
 Pushable twins print first (diff 2–3). Then the usual cheap-row ranking.
 
 Usage:
@@ -604,12 +608,43 @@ def lemma_record_at(root: Path, rev: str, rel: str) -> dict | None:
 def import_lemma_ids(imports: list) -> list[str]:
     out = []
     for imp in imports or []:
-        m = re.search(r"(L_[a-z]+_\d+)$", str(imp).replace(".", "_") if False else str(imp))
         # imports look like PEqualNP.Outside.L_meta_25534
         m = re.search(r"(L_[A-Za-z]+_\d+)\s*$", str(imp))
         if m:
             out.append(module_to_gap(m.group(1)))
     return out
+
+
+def lemma_module_name(gid: str) -> str:
+    return f"PEqualNP.Outside.{gap_to_module(gid)}"
+
+
+def row_allows_lemma(row: dict, lemma_id: str) -> bool:
+    """True when the desk lists the lemma's module (CI import whitelist)."""
+    listed = {str(x) for x in (row.get("imports") or [])}
+    return lemma_module_name(lemma_id) in listed
+
+
+def parse_import_names(text: str) -> list[str]:
+    """Leading `import M` lines, same shape as outside-guard.mjs."""
+    names: list[str] = []
+    rx = re.compile(
+        r"^import ([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*)[ \t]*$"
+    )
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        m = rx.match(line)
+        if not m:
+            break
+        names.append(m.group(1))
+    return names
+
+
+def import_is_allowed(name: str, listed: list | set) -> bool:
+    if name == "Mathlib" or name.startswith("Mathlib."):
+        return True
+    return name in set(listed or [])
 
 
 def find_twins(
@@ -691,6 +726,7 @@ def find_twins(
             "rev-ineq",
             "rev-ineq-push",
             "skip-find-refute",
+            "skip-not-listed",
             "imports",
             "witness",
             "symmetry",
@@ -717,7 +753,11 @@ def find_twins(
         seen.add(key)
         catch(sweep if sweep in caught else "rev-ineq", gap_id)
         action, tag = twin_action(row, rec, sweep)
-        if sweep == "rev-ineq" or sweep == "imports":
+        listed = row_allows_lemma(row, lemma_id)
+        if not listed:
+            catch("skip-not-listed", gap_id)
+            action, tag = None, "skip-not-listed"
+        elif sweep == "rev-ineq" or sweep == "imports":
             if action is None:
                 catch("skip-find-refute", gap_id)
             elif sweep == "rev-ineq":
@@ -743,6 +783,7 @@ def find_twins(
                 "pushable": action is not None,
                 "desk_kind": row.get("desk_kind") or "check",
                 "find": bool(row.get("find")),
+                "listed": listed,
             }
         )
 
@@ -936,6 +977,7 @@ def main() -> int:
             "rev-ineq",
             "rev-ineq-push",
             "skip-find-refute",
+            "skip-not-listed",
             "imports",
             "witness",
             "symmetry",

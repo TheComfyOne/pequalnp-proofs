@@ -11,6 +11,8 @@ Usage: .cursor/tools/precheck.sh <file.lean>
 
 Fails (exit 1) when:
   - FILE contains a whole-word inductive, sorry, axiom, or native_decide
+  - the desk row is check/find and the theorem is ¬ of the posted statement
+  - an import is not Mathlib / Mathlib.* / a module the desk row lists
   - the diff against upstream/main (plus the working tree) has more than
     one Lean file outside .cursor/ and .github/
 EOF
@@ -102,10 +104,13 @@ try:
     with urllib.request.urlopen(req, timeout=30) as r:
         blob = json.load(r)
 except Exception as e:
-    if thm_neg:
-        print("precheck: cannot fetch desk row for %s (%s); refusing ¬ theorem" % (gid, e), file=sys.stderr)
+    has_pnp = any(
+        ln.startswith("import PEqualNP.") for ln in text.splitlines()
+    )
+    if thm_neg or has_pnp:
+        print("precheck: cannot fetch desk row for %s (%s); refusing" % (gid, e), file=sys.stderr)
         sys.exit(1)
-    print("precheck: desk row fetch failed for %s; theorem is not a negation, continuing" % gid, file=sys.stderr)
+    print("precheck: desk row fetch failed for %s; no PEqualNP import and theorem is not a negation, continuing" % gid, file=sys.stderr)
     sys.exit(0)
 
 row = None
@@ -125,7 +130,27 @@ desk_kind = "refute" if k == "refute" else "check"
 find = row.get("find") is True
 posted = (row.get("statement") or "").strip()
 posted_neg = posted.lstrip().startswith("¬") or posted.lstrip().startswith("(¬")
-print("precheck: desk %s kind=%s find=%s" % (gid, desk_kind, find), file=sys.stderr)
+listed = [str(x) for x in (row.get("imports") or [])]
+print("precheck: desk %s kind=%s find=%s imports=%s" % (gid, desk_kind, find, listed), file=sys.stderr)
+
+import_rx = re.compile(r"^import ([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)*)[ \t]*$")
+for i, line in enumerate(text.splitlines(), 1):
+    if not line.strip():
+        continue
+    m = import_rx.match(line)
+    if not m:
+        break
+    name = m.group(1)
+    if name == "Mathlib" or name.startswith("Mathlib."):
+        continue
+    if name not in listed:
+        print(
+            "precheck: line %d: import %s is not allowed (only Mathlib and the modules the gap lists)"
+            % (i, name),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+print("precheck: imports match desk whitelist", file=sys.stderr)
 
 if desk_kind != "refute":
     if thm_neg and not posted_neg:
