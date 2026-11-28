@@ -262,3 +262,28 @@ taking the twin.
 join.txt: prove exactly the posted statement; **refute** kind means prove
 the negated twin listed beside the unit. Search empty range →
 `pnp.sh release exhausted`.
+
+## Table 2 / mono6 generator (working, 2026-11-28)
+
+`.cursor/tools/gen_mono6.py` plus engine `.cursor/templates/Mono6Engine.lean`.
+
+Emits a grayboywilliams-style prove file (merged L-meta-40217 / 40417):
+packed BitVec 256 rows, kissat 10-gate AND/OR witness, Python dump of
+`bkA`/`bkB`, `search_false_C2` (`dp=0 J=5 d=2 g=8 nb=256`). Needs
+`kissat` on PATH. Import only `PEqualNP.Defs`. No sorry / axiom /
+native_decide / inductive / quotes.
+
+```
+python3 .cursor/tools/gen_mono6.py \
+    --id L-meta-XXXX --hi HI --lo LO \
+    --out lean/PEqualNP/Outside/L_meta_XXXX.lean
+# or: --from-lean /path/to/merged.lean
+cd lean && lake build PEqualNP.Outside.L_meta_XXXX
+node tools/check-lean.mjs lean/PEqualNP/Outside/L_meta_XXXX.lean STMT check
+```
+
+Local e2e, no lease: L-meta-40217 ACCEPTED (gen 10s, lake 101s, checker
+121s, 233990 B); L-meta-40417 ACCEPTED (gen 22s, lake 102s, checker
+115s, 237209 B). `--sat-timeout` default 90s. Difficulty 4/10 once the
+generator exists (SAT + ~100s Lean). Cut the proof branch from
+`upstream/main`; do not put `.cursor/` on the PR.
