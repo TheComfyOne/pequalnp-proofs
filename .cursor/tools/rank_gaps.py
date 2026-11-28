@@ -265,9 +265,8 @@ def ensure_upstream(root: Path, fetch: bool) -> str:
     return sha
 
 
-def new_merged_lean(root: Path, last_sha: str, head: str) -> list[Path]:
-    """Outside Lean files that changed on upstream/main since last_sha."""
-    outside = root / "lean" / "PEqualNP" / "Outside"
+def new_merged_names(root: Path, last_sha: str, head: str) -> list[str]:
+    """Outside Lean paths that changed on upstream/main since last_sha."""
     names: list[str] = []
     if last_sha and head:
         diff = git_out(
@@ -295,9 +294,34 @@ def new_merged_lean(root: Path, last_sha: str, head: str) -> list[Path]:
     out = []
     seen = set()
     for n in names:
-        if n in seen:
+        n = n.replace("\\", "/")
+        if not n or n in seen:
+            continue
+        if "/Outside/" not in n or not n.endswith(".lean"):
             continue
         seen.add(n)
+        out.append(n)
+    return out
+
+
+def git_show_tail(root: Path, rev: str, rel: str, nbytes: int = 32768) -> str:
+    p = subprocess.run(
+        ["git", "show", f"{rev}:{rel}"],
+        cwd=root,
+        capture_output=True,
+        timeout=60,
+    )
+    if p.returncode != 0 or not p.stdout:
+        return ""
+    data = p.stdout[-nbytes:]
+    return data.decode("utf-8", "replace")
+
+
+def new_merged_lean(root: Path, last_sha: str, head: str) -> list[Path]:
+    """Disk paths for new Outside files that exist in this worktree."""
+    outside = root / "lean" / "PEqualNP" / "Outside"
+    out = []
+    for n in new_merged_names(root, last_sha, head):
         p = root / n
         if p.is_file() and p.parent == outside:
             out.append(p)
@@ -408,11 +432,7 @@ def read_tail(path: Path, nbytes: int = 8192) -> str:
         return ""
 
 
-def lemma_record(path: Path) -> dict | None:
-    tail = read_tail(path)
-    if THM_START not in tail:
-        # Huge files may put the theorem earlier than 8KB; retry 32KB.
-        tail = read_tail(path, 32768)
+def lemma_record_from_tail(tail: str, stem: str, path: str = "") -> dict | None:
     typ = last_theorem_type(tail)
     if not typ:
         return None
@@ -423,13 +443,35 @@ def lemma_record(path: Path) -> dict | None:
     elif ineq and ineq[1] in ("≤", "≥"):
         kind = "lower"
     return {
-        "path": str(path),
-        "module": path.stem,
-        "gap": module_to_gap(path.stem),
+        "path": path,
+        "module": stem,
+        "gap": module_to_gap(stem),
         "type": typ,
         "ineq": ineq,
         "kind": kind,
     }
+
+
+def lemma_record(path: Path) -> dict | None:
+    tail = read_tail(path)
+    if THM_START not in tail:
+        # Huge files may put the theorem earlier than 8KB; retry 32KB.
+        tail = read_tail(path, 32768)
+    return lemma_record_from_tail(tail, path.stem, str(path))
+
+
+def lemma_record_at(root: Path, rev: str, rel: str) -> dict | None:
+    """Read a lemma from git even if it is not in the current worktree."""
+    p = root / rel
+    if p.is_file():
+        rec = lemma_record(p)
+        if rec:
+            return rec
+    stem = Path(rel).stem
+    tail = git_show_tail(root, rev, rel)
+    if not tail:
+        return None
+    return lemma_record_from_tail(tail, stem, rel)
 
 
 def import_lemma_ids(imports: list) -> list[str]:
@@ -489,10 +531,11 @@ def find_twins(
         key = (norm_expr(ineq[2]), norm_expr(ineq[0]))
         rev_index.setdefault(key, []).append(row)
 
-    new_files = new_merged_lean(root, last_sha, head)
+    new_names = new_merged_names(root, last_sha, head)
+    new_mods = {Path(n).stem for n in new_names}
     lemmas: dict[str, dict] = {}
-    for p in new_files:
-        rec = lemma_record(p)
+    for rel in new_names:
+        rec = lemma_record_at(root, head, rel)
         if rec:
             lemmas[rec["gap"]] = rec
 
@@ -531,7 +574,7 @@ def find_twins(
         )
 
     for lid, rec in lemmas.items():
-        is_new = any(p.stem == rec["module"] for p in new_files)
+        is_new = rec["module"] in new_mods
         ineq = rec.get("ineq")
         if ineq:
             key = (norm_expr(ineq[0]), norm_expr(ineq[2]))
